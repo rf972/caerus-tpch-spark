@@ -39,6 +39,9 @@ abstract class TpchQuery {
 
 object TpchQuery {
 
+  private val sparkConf = new SparkConf().setAppName("Simple Application")
+  private val sparkContext = new SparkContext(sparkConf)
+
   def outputDF(df: DataFrame, outputDir: String, className: String): Unit = {
 
     if (outputDir == null || outputDir == "")
@@ -48,8 +51,7 @@ object TpchQuery {
       df.write.mode("overwrite").format("csv").option("header", "true").save(outputDir + "/" + className)
   }
 
-  def executeQueries(sc: SparkContext, 
-                     schemaProvider: TpchSchemaProvider, 
+  def executeQueries(schemaProvider: TpchSchemaProvider, 
                      queryNum: Int): ListBuffer[(String, Float)] = {
 
     val OUTPUT_DIR: String = "file:///build/tpch-test-output"
@@ -69,7 +71,7 @@ object TpchQuery {
       val query = Class.forName(f"main.scala.Q${queryNo}%02d")
                        .newInstance.asInstanceOf[TpchQuery]
 
-      outputDF(query.execute(sc, schemaProvider), OUTPUT_DIR, query.getName())
+      outputDF(query.execute(sparkContext, schemaProvider), OUTPUT_DIR, query.getName())
 
       val t1 = System.nanoTime()
 
@@ -88,6 +90,7 @@ object TpchQuery {
     test: String = "csv",
     var init: Boolean = false,
     s3Select: Boolean = false,
+    verbose: Boolean = false,
     kwargs: Map[String, String] = Map())
   
   val maxTests = 22
@@ -110,6 +113,10 @@ object TpchQuery {
         opt[Unit]("s3Select")
           .action((x, c) => c.copy(s3Select = true))
           .text("Enable s3Select pushdown, default is disabled."),
+        opt[Unit]("verbose")
+          .action((x, c) => c.copy(verbose = true))
+          .text("Enable verbose Spark output (TRACE level)."),
+        help("help").text("prints this usage text"),
       )
     }
     // OParser.parse returns Option[Config]
@@ -137,18 +144,13 @@ object TpchQuery {
   }
   val inputTblPath = "file:///build/tpch-data"
   def benchmark(config: Config): Unit = {
-        
-    val conf = new SparkConf().setAppName("Simple Application")
-    val sc = new SparkContext(conf)
-
-    // read files from local FS
     val inputPath = if (config.test == "csv") "s3a://tpch-test" else inputTblPath
 
-    val schemaProvider = new TpchSchemaProvider(sc, inputPath, 
+    val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath, 
                                                 config.s3Select, config.fileType)
     for (i <- config.start to config.end) {
       val output = new ListBuffer[(String, Float)]
-      output ++= executeQueries(sc, schemaProvider, i)
+      output ++= executeQueries(schemaProvider, i)
 
       val outFile = new File("TIMES" + i + ".txt")
       val bw = new BufferedWriter(new FileWriter(outFile, true))
@@ -162,11 +164,7 @@ object TpchQuery {
   }
 
   def init(config: Config): Unit = {
-        
-    val conf = new SparkConf().setAppName("Simple Application")
-    val sc = new SparkContext(conf)
-
-    val schemaProvider = new TpchSchemaProvider(sc, inputTblPath, 
+    val schemaProvider = new TpchSchemaProvider(sparkContext, inputTblPath, 
                                                 config.s3Select, config.fileType)
 
     for ((name, df) <- schemaProvider.dfMap) {
@@ -177,9 +175,8 @@ object TpchQuery {
         .format("csv")
         .save(outputFolder)
 
-      val fs = FileSystem.get(sc.hadoopConfiguration)
+      val fs = FileSystem.get(sparkContext.hadoopConfiguration)
       val file = fs.globStatus(new Path(outputFolder + "/part-0000*"))(0).getPath().getName()
-      println("\n\n\n\nfound " + file)
       println(outputFolder + "/" + file + "->" + "/build/tpch-data/" + name + ".csv")
       fs.rename(new Path(outputFolder + "/" + file), new Path("/build/tpch-data/" + name + ".csv"))
       println("Finished writing " + name + ".csv")
@@ -197,6 +194,9 @@ object TpchQuery {
     println("start: " + config.start)
     println("end: " + config.end)
     
+    if (config.verbose) {
+      sparkContext.setLogLevel("TRACE")
+    }
     if (config.test == "init") {
       init(config)
     } else {
