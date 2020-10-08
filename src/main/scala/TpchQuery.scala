@@ -86,8 +86,8 @@ object TpchQuery {
   case class Config(
     start: Int = 0,
     var end: Int = -1,
-    var fileType: FileType = CSV,
-    test: String = "csv",
+    var fileType: FileType = CSVS3,
+    test: String = "csvS3",
     var init: Boolean = false,
     s3Select: Boolean = false,
     verbose: Boolean = false,
@@ -109,7 +109,7 @@ object TpchQuery {
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
-          .text("test to run (csv, tbl, init"),
+          .text("test to run (csvS3, csvFile, tbl, init"),
         opt[Unit]("s3Select")
           .action((x, c) => c.copy(s3Select = true))
           .text("Enable s3Select pushdown, default is disabled."),
@@ -127,7 +127,8 @@ object TpchQuery {
           println("args are good")
 
           config.test match {
-            case "csv" => config.fileType = CSV
+            case "csvS3" => config.fileType = CSVS3
+            case "csvFile" => config.fileType = CSVFile
             case "tbl" => config.fileType = TBL
             case "init" => {
               config.init = true
@@ -144,7 +145,7 @@ object TpchQuery {
   }
   val inputTblPath = "file:///build/tpch-data"
   def benchmark(config: Config): Unit = {
-    val inputPath = if (config.test == "csv") "s3a://tpch-test" else inputTblPath
+    val inputPath = if (config.test == "csvS3") "s3a://tpch-test" else inputTblPath
 
     val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath, 
                                                 config.s3Select, config.fileType)

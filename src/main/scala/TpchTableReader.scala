@@ -7,7 +7,7 @@ import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import scala.reflect.runtime.universe._
 
-object TpchTableReader {
+object TpchTableReaderS3 {
   
   private val s3IpAddr = "minioserver"
   private val sparkSession = SparkSession.builder
@@ -17,10 +17,6 @@ object TpchTableReader {
       .config("spark.datasource.s3.accessKey", "admin")
       .config("spark.datasource.s3.secretKey", "admin123")
       .getOrCreate()
-
-  private val dfRead = sparkSession.read
-      .format("org.apache.spark.sql.execution.datasources.v2.s3")
-      .option("format", "csv")
 
   def readTable[T: WeakTypeTag]
                (name: String, inputDir: String, s3Select: Boolean)
@@ -44,5 +40,24 @@ object TpchTableReader {
         // df.show()
         df
     }
+  }
+}
+object TpchTableReaderFile {
+  
+  private val sparkSession = SparkSession.builder
+      .master("local[2]")
+      .appName("TpchProvider")
+      .getOrCreate()
+
+  def readTable[T: WeakTypeTag]
+               (name: String, inputDir: String)
+               (implicit tag: TypeTag[T]): Dataset[Row] = {
+    val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
+    val df = sparkSession.read
+        .format("csv")
+        .schema(schema)
+        .load(inputDir + "/" +  name + ".csv")
+        // df.show()
+        df
   }
 }

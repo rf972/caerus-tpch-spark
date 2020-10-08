@@ -86,7 +86,8 @@ case class Supplier(
   s_comment: String)
 
 sealed trait FileType
-case object CSV extends FileType
+case object CSVS3 extends FileType
+case object CSVFile extends FileType
 case object TBL extends FileType   
 class TpchSchemaProvider(sc: SparkContext, 
                          inputDir: String, 
@@ -98,16 +99,26 @@ class TpchSchemaProvider(sc: SparkContext,
   import sqlContext.implicits._
 
   val dfMap = 
-    if (fileType == CSV) 
+    if (fileType == CSVS3) 
       Map(
-          "customer" -> TpchTableReader.readTable[Customer]("customer", inputDir, s3Select),
-          "lineitem" -> TpchTableReader.readTable[Lineitem]("lineitem", inputDir, s3Select),
-          "nation" -> TpchTableReader.readTable[Nation]("nation", inputDir, s3Select),
-          "region" -> TpchTableReader.readTable[Region]("region", inputDir, s3Select),
-          "order" -> TpchTableReader.readTable[Order]("order", inputDir, s3Select),
-          "part" -> TpchTableReader.readTable[Part]("part", inputDir, s3Select),
-          "partsupp" -> TpchTableReader.readTable[Partsupp]("partsupp", inputDir, s3Select),
-          "supplier" -> TpchTableReader.readTable[Supplier]("supplier", inputDir, s3Select) )
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer", inputDir, s3Select),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem", inputDir, s3Select),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation", inputDir, s3Select),
+          "region" -> TpchTableReaderS3.readTable[Region]("region", inputDir, s3Select),
+          "order" -> TpchTableReaderS3.readTable[Order]("order", inputDir, s3Select),
+          "part" -> TpchTableReaderS3.readTable[Part]("part", inputDir, s3Select),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp", inputDir, s3Select),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier", inputDir, s3Select) )
+    else if (fileType == CSVFile) 
+      Map(
+          "customer" -> TpchTableReaderFile.readTable[Customer]("customer", inputDir),
+          "lineitem" -> TpchTableReaderFile.readTable[Lineitem]("lineitem", inputDir),
+          "nation" -> TpchTableReaderFile.readTable[Nation]("nation", inputDir),
+          "region" -> TpchTableReaderFile.readTable[Region]("region", inputDir),
+          "order" -> TpchTableReaderFile.readTable[Order]("order", inputDir),
+          "part" -> TpchTableReaderFile.readTable[Part]("part", inputDir),
+          "partsupp" -> TpchTableReaderFile.readTable[Partsupp]("partsupp", inputDir),
+          "supplier" -> TpchTableReaderFile.readTable[Supplier]("supplier", inputDir) )
     else
       Map(
         "customer" -> sc.textFile(inputDir + "/customer.tbl*").map(_.split('|')).map(p =>
