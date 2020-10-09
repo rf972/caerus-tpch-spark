@@ -86,6 +86,7 @@ object TpchQuery {
   case class Config(
     start: Int = 0,
     var end: Int = -1,
+    partitions: Int = 0,
     var fileType: FileType = CSVS3,
     test: String = "csvS3",
     var init: Boolean = false,
@@ -102,10 +103,13 @@ object TpchQuery {
       OParser.sequence(
         programName("TCPH Benchmark"),
         head("tpch-test", "0.1"),
-        // option -f, --foo
         opt[Int]('s', "start")
           .action((x, c) => c.copy(start = x.toInt))
           .text("start test number"),
+        opt[Int]('p', "partitions")
+          .required
+          .action((x, c) => c.copy(partitions = x.toInt))
+          .text("partitions to use"),
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
@@ -148,7 +152,8 @@ object TpchQuery {
     val inputPath = if (config.test == "csvS3") "s3a://tpch-test" else inputTblPath
 
     val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath, 
-                                                config.s3Select, config.fileType)
+                                                config.s3Select, config.fileType,
+                                                config.partitions)
     for (i <- config.start to config.end) {
       val output = new ListBuffer[(String, Float)]
       output ++= executeQueries(schemaProvider, i)
@@ -166,7 +171,8 @@ object TpchQuery {
 
   def init(config: Config): Unit = {
     val schemaProvider = new TpchSchemaProvider(sparkContext, inputTblPath, 
-                                                config.s3Select, config.fileType)
+                                                config.s3Select, config.fileType,
+                                                config.partitions)
 
     for ((name, df) <- schemaProvider.dfMap) {
       val outputFolder = "/build/tpch-data/" + name + "raw"

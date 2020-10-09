@@ -19,7 +19,8 @@ object TpchTableReaderS3 {
       .getOrCreate()
 
   def readTable[T: WeakTypeTag]
-               (name: String, inputDir: String, s3Select: Boolean)
+               (name: String, inputDir: String,
+                s3Select: Boolean, partitions: Int)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     if (!s3Select) {
@@ -27,6 +28,7 @@ object TpchTableReaderS3 {
         .format("org.apache.spark.sql.execution.datasources.v2.s3")
         .option("format", "csv")
         .option("DisablePushDown", "")
+        .option("partitions", partitions)
         .schema(schema)
         .load(inputDir + "/" +  name + ".csv*")
         // df.show()
@@ -35,6 +37,7 @@ object TpchTableReaderS3 {
       val df = sparkSession.read
         .format("org.apache.spark.sql.execution.datasources.v2.s3")
         .option("format", "csv")
+        .option("partitions", partitions)
         .schema(schema)
         .load(inputDir + "/" +  name + ".csv*")
         // df.show()

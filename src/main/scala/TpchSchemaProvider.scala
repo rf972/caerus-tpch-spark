@@ -92,7 +92,8 @@ case object TBL extends FileType
 class TpchSchemaProvider(sc: SparkContext, 
                          inputDir: String, 
                          s3Select: Boolean,
-                         fileType: FileType) {
+                         fileType: FileType,
+                         partitions: Int) {
 
   // this is used to implicitly convert an RDD to a DataFrame.
   val sqlContext = new org.apache.spark.sql.SQLContext(sc)
@@ -101,14 +102,14 @@ class TpchSchemaProvider(sc: SparkContext,
   val dfMap = 
     if (fileType == CSVS3) 
       Map(
-          "customer" -> TpchTableReaderS3.readTable[Customer]("customer", inputDir, s3Select),
-          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem", inputDir, s3Select),
-          "nation" -> TpchTableReaderS3.readTable[Nation]("nation", inputDir, s3Select),
-          "region" -> TpchTableReaderS3.readTable[Region]("region", inputDir, s3Select),
-          "order" -> TpchTableReaderS3.readTable[Order]("order", inputDir, s3Select),
-          "part" -> TpchTableReaderS3.readTable[Part]("part", inputDir, s3Select),
-          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp", inputDir, s3Select),
-          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier", inputDir, s3Select) )
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer", inputDir, s3Select, partitions),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem", inputDir, s3Select, partitions),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation", inputDir, s3Select, partitions),
+          "region" -> TpchTableReaderS3.readTable[Region]("region", inputDir, s3Select, partitions),
+          "order" -> TpchTableReaderS3.readTable[Order]("order", inputDir, s3Select, partitions),
+          "part" -> TpchTableReaderS3.readTable[Part]("part", inputDir, s3Select, partitions),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
     else if (fileType == CSVFile) 
       Map(
           "customer" -> TpchTableReaderFile.readTable[Customer]("customer", inputDir),
