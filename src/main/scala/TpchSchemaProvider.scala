@@ -86,28 +86,50 @@ case class Supplier(
   s_comment: String)
 
 sealed trait FileType
-case object CSV extends FileType
-case object TBL extends FileType   
+case object CSVS3 extends FileType
+case object CSVFile extends FileType
+case object TBLFile extends FileType
+case object TBLS3 extends FileType
 class TpchSchemaProvider(sc: SparkContext, 
                          inputDir: String, 
                          s3Select: Boolean,
-                         fileType: FileType) {
+                         fileType: FileType,
+                         partitions: Int) {
 
   // this is used to implicitly convert an RDD to a DataFrame.
   val sqlContext = new org.apache.spark.sql.SQLContext(sc)
   import sqlContext.implicits._
-
   val dfMap = 
-    if (fileType == CSV) 
+    if (fileType == CSVS3) 
       Map(
-          "customer" -> TpchTableReader.readTable[Customer]("customer", inputDir, s3Select),
-          "lineitem" -> TpchTableReader.readTable[Lineitem]("lineitem", inputDir, s3Select),
-          "nation" -> TpchTableReader.readTable[Nation]("nation", inputDir, s3Select),
-          "region" -> TpchTableReader.readTable[Region]("region", inputDir, s3Select),
-          "order" -> TpchTableReader.readTable[Order]("order", inputDir, s3Select),
-          "part" -> TpchTableReader.readTable[Part]("part", inputDir, s3Select),
-          "partsupp" -> TpchTableReader.readTable[Partsupp]("partsupp", inputDir, s3Select),
-          "supplier" -> TpchTableReader.readTable[Supplier]("supplier", inputDir, s3Select) )
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.csv", inputDir, s3Select, partitions),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.csv", inputDir, s3Select, partitions),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.csv", inputDir, s3Select, partitions),
+          "region" -> TpchTableReaderS3.readTable[Region]("region.csv", inputDir, s3Select, partitions),
+          "order" -> TpchTableReaderS3.readTable[Order]("order.csv", inputDir, s3Select, partitions),
+          "part" -> TpchTableReaderS3.readTable[Part]("part.csv", inputDir, s3Select, partitions),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.csv", inputDir, s3Select, partitions),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.csv", inputDir, s3Select, partitions) )
+    else if (fileType == CSVFile) 
+      Map(
+          "customer" -> TpchTableReaderFile.readTable[Customer]("customer", inputDir),
+          "lineitem" -> TpchTableReaderFile.readTable[Lineitem]("lineitem", inputDir),
+          "nation" -> TpchTableReaderFile.readTable[Nation]("nation", inputDir),
+          "region" -> TpchTableReaderFile.readTable[Region]("region", inputDir),
+          "order" -> TpchTableReaderFile.readTable[Order]("order", inputDir),
+          "part" -> TpchTableReaderFile.readTable[Part]("part", inputDir),
+          "partsupp" -> TpchTableReaderFile.readTable[Partsupp]("partsupp", inputDir),
+          "supplier" -> TpchTableReaderFile.readTable[Supplier]("supplier", inputDir) )
+    else if (fileType == TBLS3)
+      Map(
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.tbl", inputDir, s3Select, partitions),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.tbl", inputDir, s3Select, partitions),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.tbl", inputDir, s3Select, partitions),
+          "region" -> TpchTableReaderS3.readTable[Region]("region.tbl", inputDir, s3Select, partitions),
+          "order" -> TpchTableReaderS3.readTable[Order]("order.tbl", inputDir, s3Select, partitions),
+          "part" -> TpchTableReaderS3.readTable[Part]("part.tbl", inputDir, s3Select, partitions),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.tbl", inputDir, s3Select, partitions),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.tbl", inputDir, s3Select, partitions) )
     else
       Map(
         "customer" -> sc.textFile(inputDir + "/customer.tbl*").map(_.split('|')).map(p =>
