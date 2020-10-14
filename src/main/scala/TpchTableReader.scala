@@ -25,7 +25,7 @@ object TpchTableReaderS3 {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     if (!s3Select) {
       val df = sparkSession.read
-        .format("org.apache.spark.sql.execution.datasources.v2.s3") // com.github.s3datasource
+        .format("com.github.s3datasource") // "org.apache.spark.sql.execution.datasources.v2.s3"
         .option("format", "csv")
         .option("DisablePushDown", "")
         .option("partitions", partitions)
@@ -35,7 +35,7 @@ object TpchTableReaderS3 {
         df
     } else {
       val df = sparkSession.read
-        .format("org.apache.spark.sql.execution.datasources.v2.s3")
+        .format("com.github.s3datasource")
         .option("format", "csv")
         .option("partitions", partitions)
         .schema(schema)
