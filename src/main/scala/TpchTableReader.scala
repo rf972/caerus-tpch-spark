@@ -28,7 +28,6 @@ object TpchTableReaderS3 {
         .format("com.github.s3datasource") // "org.apache.spark.sql.execution.datasources.v2.s3"
         .option("format", "csv")
         .option("DisablePushDown", "")
-        .option("partitions", partitions)
         .schema(schema)
         .load(inputDir + "/" +  name)
         // df.show()
@@ -37,7 +36,6 @@ object TpchTableReaderS3 {
       val df = sparkSession.read
         .format("com.github.s3datasource")
         .option("format", "csv")
-        .option("partitions", partitions)
         .schema(schema)
         .load(inputDir + "/" +  name)
         // df.show()
