@@ -92,6 +92,7 @@ object TpchQuery {
     var init: Boolean = false,
     s3Select: Boolean = false,
     verbose: Boolean = false,
+    quiet: Boolean = false,
     kwargs: Map[String, String] = Map())
   
   val maxTests = 22
@@ -103,13 +104,12 @@ object TpchQuery {
       OParser.sequence(
         programName("TCPH Benchmark"),
         head("tpch-test", "0.1"),
-        opt[Int]('s', "start")
+        opt[Int]('n', "num")
           .action((x, c) => c.copy(start = x.toInt))
           .text("start test number"),
-        opt[Int]('p', "partitions")
-          .required
-          .action((x, c) => c.copy(partitions = x.toInt))
-          .text("partitions to use"),
+        // opt[Int]('p', "partitions")
+        //  .action((x, c) => c.copy(partitions = x.toInt))
+        //  .text("partitions to use"),
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
@@ -119,7 +119,10 @@ object TpchQuery {
           .text("Enable s3Select pushdown, default is disabled."),
         opt[Unit]("verbose")
           .action((x, c) => c.copy(verbose = true))
-          .text("Enable verbose Spark output (TRACE level)."),
+          .text("Enable verbose Spark output (TRACE log level )."),
+        opt[Unit]('q', "quiet")
+          .action((x, c) => c.copy(quiet = true))
+          .text("Limit output (WARN log level)."),
         help("help").text("prints this usage text"),
       )
     }
@@ -127,9 +130,7 @@ object TpchQuery {
     val config = OParser.parse(parser1, args, Config())
             
     config match {
-        case Some(config) => 
-          println("args are good")
-
+        case Some(config) =>
           config.test match {
             case "csvS3" => config.fileType = CSVS3
             case "csvFile" => config.fileType = CSVFile
@@ -182,6 +183,7 @@ object TpchQuery {
       df.repartition(1)
         .write
         .option("header", true)
+        .option("partitions", "1")
         .format("csv")
         .save(outputFolder)
 
@@ -203,8 +205,9 @@ object TpchQuery {
     println("fileType: " + config.fileType)
     println("start: " + config.start)
     println("end: " + config.end)
-    
-    if (config.verbose) {
+    if (config.quiet) {
+      sparkContext.setLogLevel("WARN")
+    } else if (config.verbose) {
       sparkContext.setLogLevel("TRACE")
     }
     if (config.test == "init") {
