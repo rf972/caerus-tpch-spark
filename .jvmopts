@@ -1,0 +1,4 @@
+-Dsbt.global.base=/tpch/tpch-spark/build/sbt/ 
+-Dsbt.ivy.home=/tpch/tpch-spark/build/ivy2/ 
+-Divy.home=/tpch/tpch-spark/build/ivy2/ 
+-Dsbt.coursier.home=/tpch/tpch-spark/build/coursier/
