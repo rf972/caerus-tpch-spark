@@ -107,9 +107,9 @@ object TpchQuery {
         opt[Int]('n', "num")
           .action((x, c) => c.copy(start = x.toInt))
           .text("start test number"),
-        // opt[Int]('p', "partitions")
-        //  .action((x, c) => c.copy(partitions = x.toInt))
-        //  .text("partitions to use"),
+         opt[Int]('p', "partitions")
+          .action((x, c) => c.copy(partitions = x.toInt))
+          .text("partitions to use"),
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
@@ -149,7 +149,7 @@ object TpchQuery {
           new Config
       }
   }
-  val inputTblPath = "file:///build/tpch-data"
+  val inputTblPath = "file:///tpch-data"
   def benchmark(config: Config): Unit = {
     val inputPath = 
       config.test match { case x if x == "csvS3" || x == "tblS3" => "s3a://tpch-test" 
@@ -160,8 +160,13 @@ object TpchQuery {
                                                 config.partitions)
     for (i <- config.start to config.end) {
       val output = new ListBuffer[(String, Float)]
-      output ++= executeQueries(schemaProvider, i)
 
+      val start = System.currentTimeMillis()
+      output ++= executeQueries(schemaProvider, i)
+      val end = System.currentTimeMillis()
+
+      val seconds = (end - start) / 1000.0 //BigDecimal((end-start)/1000.0).setScale(3, BigDecimal.RoundingMode.HALF_DOWN).toFloat
+      println("Query Time " + seconds)
       val outFile = new File("TIMES" + i + ".txt")
       val bw = new BufferedWriter(new FileWriter(outFile, true))
 
@@ -173,8 +178,9 @@ object TpchQuery {
     }
   }
 
+  val initTblPath = "file:///build/tpch-data"
   def init(config: Config): Unit = {
-    val schemaProvider = new TpchSchemaProvider(sparkContext, inputTblPath, 
+    val schemaProvider = new TpchSchemaProvider(sparkContext, initTblPath, 
                                                 config.s3Select, config.fileType,
                                                 config.partitions)
 
