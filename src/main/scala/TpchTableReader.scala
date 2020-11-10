@@ -7,6 +7,15 @@ import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import scala.reflect.runtime.universe._
 
+case class TpchS3Options(enableFilter: Boolean,
+                         enableProject: Boolean,
+                         enableAggregate: Boolean) {
+
+    def isEnabled() : Boolean = {
+      enableFilter && enableProject && enableAggregate
+    }
+}
+
 object TpchTableReaderS3 {
   
   private val s3IpAddr = "minioserver"
@@ -20,27 +29,27 @@ object TpchTableReaderS3 {
 
   def readTable[T: WeakTypeTag]
                (name: String, inputDir: String,
-                s3Select: Boolean, partitions: Int)
+                s3Options: TpchS3Options, partitions: Int)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    if (!s3Select) {
+    if (s3Options.isEnabled()) {
       val df = sparkSession.read
         .format("com.github.s3datasource") // "org.apache.spark.sql.execution.datasources.v2.s3"
         .option("format", "csv")
-        .option("DisablePushDown", "")
         .option("partitions", partitions)
         .schema(schema)
         .load(inputDir + "/" +  name)
-        // df.show()
         df
     } else {
       val df = sparkSession.read
         .format("com.github.s3datasource")
         .option("format", "csv")
         .option("partitions", partitions)
+        .option((if (s3Options.enableFilter) "Enable" else "Disable") + "FilterPush", "")
+        .option((if (s3Options.enableProject) "Enable" else "Disable") + "ProjectPush", "")
+        .option((if (s3Options.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .schema(schema)
         .load(inputDir + "/" +  name)
-        // df.show()
         df
     }
   }

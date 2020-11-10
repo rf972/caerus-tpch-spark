@@ -92,7 +92,7 @@ case object TBLFile extends FileType
 case object TBLS3 extends FileType
 class TpchSchemaProvider(sc: SparkContext, 
                          inputDir: String, 
-                         s3Select: Boolean,
+                         s3Select: TpchS3Options,
                          fileType: FileType,
                          partitions: Int) {
 
