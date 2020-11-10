@@ -11,6 +11,8 @@ import scala.reflect.runtime.universe._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import scopt.OParser
 import org.apache.hadoop.fs._
+import org.tpch.tablereader._
+
 /**
  * Parent class for TPC-H queries.
  *
@@ -90,7 +92,11 @@ object TpchQuery {
     var fileType: FileType = CSVS3,
     test: String = "csvS3",
     var init: Boolean = false,
+    var s3Options: TpchS3Options = new TpchS3Options(false, false, false),
     s3Select: Boolean = false,
+    s3Filter: Boolean = false,
+    s3Project: Boolean = false,
+    s3Aggregate: Boolean = false,
     verbose: Boolean = false,
     quiet: Boolean = false,
     kwargs: Map[String, String] = Map())
@@ -113,10 +119,19 @@ object TpchQuery {
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
-          .text("test to run (csvS3, csvFile, tblS3, tblFile, init"),
+          .text("test to run (csvS3, csvFile, tblS3, tblPartS3, tblFile, init"),
         opt[Unit]("s3Select")
           .action((x, c) => c.copy(s3Select = true))
-          .text("Enable s3Select pushdown, default is disabled."),
+          .text("Enable s3Select pushdown (filter, project), default is disabled."),
+        opt[Unit]("s3Filter")
+          .action((x, c) => c.copy(s3Filter = true))
+          .text("Enable s3Select pushdown of filter, default is disabled."),
+        opt[Unit]("s3Project")
+          .action((x, c) => c.copy(s3Project = true))
+          .text("Enable s3Select pushdown of project, default is disabled."),
+        opt[Unit]("s3Aggregate")
+          .action((x, c) => c.copy(s3Aggregate = true))
+          .text("Enable s3Select pushdown of aggregate, default is disabled."),
         opt[Unit]("verbose")
           .action((x, c) => c.copy(verbose = true))
           .text("Enable verbose Spark output (TRACE log level )."),
@@ -136,27 +151,36 @@ object TpchQuery {
             case "csvFile" => config.fileType = CSVFile
             case "tblFile" => config.fileType = TBLFile
             case "tblS3" => config.fileType = TBLS3
+            case "tblPartS3" => config.fileType = TBLS3
             case "init" => {
               config.init = true
               config.fileType = TBLFile
             }
           }
           config.end = config.start
+          if (config.s3Select) {
+            config.s3Options = TpchS3Options(true, true, true)
+          } else {
+            config.s3Options = TpchS3Options(config.s3Filter,
+                                             config.s3Project,
+                                             config.s3Aggregate)
+          }
           config
         case _ =>
           // arguments are bad, error message will have been displayed
           System.exit(1)
           new Config
-      }
+    }
   }
   val inputTblPath = "file:///tpch-data"
   def benchmark(config: Config): Unit = {
     val inputPath = 
       config.test match { case x if x == "csvS3" || x == "tblS3" => "s3a://tpch-test" 
+                          case x if x == "tblPartS3" => "s3a://tpch-test-part" 
                           case _ => inputTblPath }
 
     val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath, 
-                                                config.s3Select, config.fileType,
+                                                config.s3Options, config.fileType,
                                                 config.partitions)
     for (i <- config.start to config.end) {
       val output = new ListBuffer[(String, Float)]
@@ -181,7 +205,7 @@ object TpchQuery {
   val initTblPath = "file:///build/tpch-data"
   def init(config: Config): Unit = {
     val schemaProvider = new TpchSchemaProvider(sparkContext, initTblPath, 
-                                                config.s3Select, config.fileType,
+                                                config.s3Options, config.fileType,
                                                 config.partitions)
 
     for ((name, df) <- schemaProvider.dfMap) {
@@ -207,6 +231,7 @@ object TpchQuery {
     var s3Select = false;
     val config = parseArgs(args) 
     println("s3Select: " + config.s3Select)
+    println("s3Options: " + config.s3Options)
     println("test: " + config.test)
     println("fileType: " + config.fileType)
     println("start: " + config.start)
