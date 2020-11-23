@@ -9,7 +9,8 @@ import scala.reflect.runtime.universe._
 
 case class TpchS3Options(enableFilter: Boolean,
                          enableProject: Boolean,
-                         enableAggregate: Boolean) {
+                         enableAggregate: Boolean,
+                         explain: Boolean) {
 
     def isEnabled() : Boolean = {
       enableFilter && enableProject && enableAggregate
