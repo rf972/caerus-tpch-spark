@@ -27,7 +27,6 @@ abstract class TpchQuery {
   private def escapeClassName(className: String): String = {
     val items = className.split("\\.")
     val last = items(items.length-1)
-    println(last)
     last.replaceAll("\\$", "")
   }
 
@@ -54,50 +53,45 @@ object TpchQuery {
   }
 
   def executeQueries(schemaProvider: TpchSchemaProvider, 
-                     queryNum: Int): ListBuffer[(String, Float)] = {
+                     queryNum: Int,
+                     config: Config): ListBuffer[(String, Float)] = {
 
     val OUTPUT_DIR: String = "file:///build/tpch-test-output"
 
     val results = new ListBuffer[(String, Float)]
 
-    var fromNum = 1;
-    var toNum = 22;
-    if (queryNum != 0) {
-      fromNum = queryNum;
-      toNum = queryNum;
+    val t0 = System.nanoTime()
+
+    val query = Class.forName(f"main.scala.Q${queryNum}%02d")
+                      .newInstance.asInstanceOf[TpchQuery]
+    if (config.explain) {
+      query.execute(sparkContext, schemaProvider).explain(true)
     }
+    outputDF(query.execute(sparkContext, schemaProvider), OUTPUT_DIR, query.getName())
 
-    for (queryNo <- fromNum to toNum) {
-      val t0 = System.nanoTime()
+    val t1 = System.nanoTime()
 
-      val query = Class.forName(f"main.scala.Q${queryNo}%02d")
-                       .newInstance.asInstanceOf[TpchQuery]
-
-      outputDF(query.execute(sparkContext, schemaProvider), OUTPUT_DIR, query.getName())
-
-      val t1 = System.nanoTime()
-
-      val elapsed = (t1 - t0) / 1000000000.0f // second
-      results += new Tuple2(query.getName(), elapsed)
-
-    }
-
+    val elapsed = (t1 - t0) / 1000000000.0f // second
+    results += new Tuple2(query.getName(), elapsed)
     return results
   }
 
   case class Config(
-    start: Int = 0,
+    var start: Int = 0,
+    testNumbers: String = "",
     var end: Int = -1,
+    repeat: Int = 1,
     partitions: Int = 0,
     var fileType: FileType = CSVS3,
     test: String = "csvS3",
     var init: Boolean = false,
-    var s3Options: TpchS3Options = new TpchS3Options(false, false, false),
+    var s3Options: TpchS3Options = new TpchS3Options(false, false, false, false),
     s3Select: Boolean = false,
     s3Filter: Boolean = false,
     s3Project: Boolean = false,
     s3Aggregate: Boolean = false,
     verbose: Boolean = false,
+    explain: Boolean = false,
     quiet: Boolean = false,
     kwargs: Map[String, String] = Map())
   
@@ -110,9 +104,9 @@ object TpchQuery {
       OParser.sequence(
         programName("TCPH Benchmark"),
         head("tpch-test", "0.1"),
-        opt[Int]('n', "num")
-          .action((x, c) => c.copy(start = x.toInt))
-          .text("start test number"),
+        opt[String]('n', "num")
+          .action((x, c) => c.copy(testNumbers = x))
+          .text("test numbers"),
          opt[Int]('p', "partitions")
           .action((x, c) => c.copy(partitions = x.toInt))
           .text("partitions to use"),
@@ -135,9 +129,15 @@ object TpchQuery {
         opt[Unit]("verbose")
           .action((x, c) => c.copy(verbose = true))
           .text("Enable verbose Spark output (TRACE log level )."),
+        opt[Unit]("explain")
+          .action((x, c) => c.copy(explain = true))
+          .text("Run explain on the df prior to query."),
         opt[Unit]('q', "quiet")
           .action((x, c) => c.copy(quiet = true))
           .text("Limit output (WARN log level)."),
+        opt[Int]('r', "repeat")
+          .action((x, c) => c.copy(repeat = x.toInt))
+          .text("Number of times to repeat test"),
         help("help").text("prints this usage text"),
       )
     }
@@ -157,13 +157,21 @@ object TpchQuery {
               config.fileType = TBLFile
             }
           }
-          config.end = config.start
+          if (config.testNumbers.contains("-")) {
+            val numbers = config.testNumbers.split("-")
+            config.start = numbers(0).toInt
+            config.end = numbers(1).toInt
+          } else {
+            config.start = config.testNumbers.toInt
+            config.end = config.start
+          }
           if (config.s3Select) {
-            config.s3Options = TpchS3Options(true, true, true)
+            config.s3Options = TpchS3Options(true, true, true, config.explain)
           } else {
             config.s3Options = TpchS3Options(config.s3Filter,
                                              config.s3Project,
-                                             config.s3Aggregate)
+                                             config.s3Aggregate,
+                                             config.explain)
           }
           config
         case _ =>
@@ -172,7 +180,9 @@ object TpchQuery {
           new Config
     }
   }
-  val inputTblPath = "file:///tpch-data"
+
+  private val inputTblPath = "file:///tpch-data"
+
   def benchmark(config: Config): Unit = {
     val inputPath = 
       config.test match { case x if x == "csvS3" || x == "tblS3" => "s3a://tpch-test" 
@@ -182,25 +192,33 @@ object TpchQuery {
     val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath, 
                                                 config.s3Options, config.fileType,
                                                 config.partitions)
-    for (i <- config.start to config.end) {
-      val output = new ListBuffer[(String, Float)]
+    var totalMs: Long = 0
+    for (r <- 0 to config.repeat) {
+      for (i <- config.start to config.end) {
+        val output = new ListBuffer[(String, Float)]
+        println("Starting Q" + i)
+        val start = System.currentTimeMillis()
+        output ++= executeQueries(schemaProvider, i, config)
+        val end = System.currentTimeMillis()
+        val ms = (end - start)
+        totalMs += ms
+        val seconds = ms / 1000.0 //BigDecimal((end-start)/1000.0).setScale(3, BigDecimal.RoundingMode.HALF_DOWN).toFloat
+        println("Query Time " + seconds)
+        val outFile = new File("TIMES" + i + ".txt")
+        val bw = new BufferedWriter(new FileWriter(outFile, true))
 
-      val start = System.currentTimeMillis()
-      output ++= executeQueries(schemaProvider, i)
-      val end = System.currentTimeMillis()
+        output.foreach {
+          case (key, value) => bw.write(f"${key}%s\t${value}%1.8f\n")
+        }
 
-      val seconds = (end - start) / 1000.0 //BigDecimal((end-start)/1000.0).setScale(3, BigDecimal.RoundingMode.HALF_DOWN).toFloat
-      println("Query Time " + seconds)
-      val outFile = new File("TIMES" + i + ".txt")
-      val bw = new BufferedWriter(new FileWriter(outFile, true))
-
-      output.foreach {
-        case (key, value) => bw.write(f"${key}%s\t${value}%1.8f\n")
+        bw.close()
       }
-
-      bw.close()
-    }
   }
+  if (config.repeat > 1) {
+    val averageSec = (totalMs / 1000.0) / config.repeat
+    println("Average Seconds per Test: " + averageSec)
+  }
+}
 
   val initTblPath = "file:///build/tpch-data"
   def init(config: Config): Unit = {
