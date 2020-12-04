@@ -5,13 +5,18 @@ import org.apache.spark.SparkConf
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
+import java.text.NumberFormat.getIntegerInstance
 import org.apache.spark.sql._
+import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.reflect.runtime.universe._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import scopt.OParser
 import org.apache.hadoop.fs._
 import org.tpch.tablereader._
+import com.github.s3datasource.store._
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
 
 /**
  * Parent class for TPC-H queries.
@@ -37,27 +42,68 @@ abstract class TpchQuery {
    */
   def execute(sc: SparkContext, tpchSchemaProvider: TpchSchemaProvider): DataFrame
 }
-
 object TpchQuery {
 
   private val sparkConf = new SparkConf().setAppName("Simple Application")
   private val sparkContext = new SparkContext(sparkConf)
 
-  def outputDF(df: DataFrame, outputDir: String, className: String): Unit = {
+  def outputDF(df: DataFrame, outputDir: String, className: String,
+               config: Config): Unit = {
 
     if (outputDir == null || outputDir == "")
       df.collect().foreach(println)
-    else
+    else {
       //df.write.mode("overwrite").json(outputDir + "/" + className + ".out") // json to avoid alias
-      df.write.mode("overwrite").format("csv").option("header", "true").save(outputDir + "/" + className)
+      
+      val castColumns = (df.schema.fields map { x =>
+        if (x.dataType == DoubleType) {
+          format_number(bround(col(x.name), 3), 2)
+          //col(x.name).cast(DecimalType(38,2))
+        } else {
+          col(x.name)
+        }      
+      }).toArray
+
+      if (!className.contains("17") && config.checkResults) {       
+        df.sort((df.columns.toSeq map { x => col(x) }).toArray:_*)
+            .select(castColumns:_*)
+            .repartition(1)
+            .write.mode("overwrite")
+            .format("csv")
+            .option("header", "true")
+            .option("partitions", "1")
+            .save(outputDir + "/" + className)
+      } else {
+        df.repartition(1)
+          .write.mode("overwrite")
+          .format("csv")
+          .option("header", "true")
+          .option("partitions", "1")
+          .save(outputDir + "/" + className)
+      }
+    }
   }
 
   def executeQueries(schemaProvider: TpchSchemaProvider, 
                      queryNum: Int,
                      config: Config): ListBuffer[(String, Float)] = {
 
-    val OUTPUT_DIR: String = "file:///build/tpch-test-output"
-
+    val OUTPUT_DIR: String = { 
+      var outputDir = "file:///build/tpch-results/latest/" + config.test
+      if (config.partitions != 0) {
+        outputDir += "-partitions-1"
+      }
+      if (config.s3Filter && config.s3Project) {
+        outputDir += "-PushdownFilterProject"
+      } else if (config.s3Select) {
+        outputDir += "-PushdownAgg"
+      } else if (config.s3Filter) {
+        outputDir += "-PushdownFilter"
+      } else if (config.s3Project) {
+        outputDir += "-PushdownProject"
+      }
+      outputDir
+    }
     val results = new ListBuffer[(String, Float)]
 
     val t0 = System.nanoTime()
@@ -67,7 +113,7 @@ object TpchQuery {
     if (config.explain) {
       query.execute(sparkContext, schemaProvider).explain(true)
     }
-    outputDF(query.execute(sparkContext, schemaProvider), OUTPUT_DIR, query.getName())
+    outputDF(query.execute(sparkContext, schemaProvider), OUTPUT_DIR, query.getName(), config)
 
     val t1 = System.nanoTime()
 
@@ -80,8 +126,10 @@ object TpchQuery {
     var start: Int = 0,
     testNumbers: String = "",
     var end: Int = -1,
-    repeat: Int = 1,
+    var testList: ArrayBuffer[Integer] = ArrayBuffer.empty[Integer],
+    repeat: Int = 0,
     partitions: Int = 0,
+    checkResults: Boolean = false,
     var fileType: FileType = CSVS3,
     test: String = "csvS3",
     var init: Boolean = false,
@@ -126,6 +174,9 @@ object TpchQuery {
         opt[Unit]("s3Aggregate")
           .action((x, c) => c.copy(s3Aggregate = true))
           .text("Enable s3Select pushdown of aggregate, default is disabled."),
+        opt[Unit]("check")
+          .action((x, c) => c.copy(checkResults = true))
+          .text("Enable checking of results."),
         opt[Unit]("verbose")
           .action((x, c) => c.copy(verbose = true))
           .text("Enable verbose Spark output (TRACE log level )."),
@@ -157,13 +208,19 @@ object TpchQuery {
               config.fileType = TBLFile
             }
           }
-          if (config.testNumbers.contains("-")) {
-            val numbers = config.testNumbers.split("-")
-            config.start = numbers(0).toInt
-            config.end = numbers(1).toInt
-          } else {
-            config.start = config.testNumbers.toInt
-            config.end = config.start
+          val ranges = config.testNumbers.split(",")
+          for (r <- ranges) {
+            if (r.contains("-")) {
+              val numbers = r.split("-")
+              if (numbers.length == 2) {
+                for (i <- numbers(0).toInt to numbers(1).toInt) {
+                  config.testList += i
+                }
+              }
+            } else {
+              config.testList += r.toInt
+            }
+            println(config.testList.mkString(", "))
           }
           if (config.s3Select) {
             config.s3Options = TpchS3Options(true, true, true, config.explain)
@@ -181,11 +238,27 @@ object TpchQuery {
     }
   }
 
-  private val inputTblPath = "file:///tpch-data"
+  case class TpchTestResult (
+    test: Integer,
+    seconds: Double,
+    bytesTransferred: Double )
+
+  private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
+    val formatter = java.text.NumberFormat.getIntegerInstance
+    println("Test Results")
+    println("Test Time (sec) Bytes")
+    println("---------------------")
+    for (r <- results) {
+      val bytes = formatter.format(r.bytesTransferred)
+      println(f"${r.test}%4d ${r.seconds}%10.3f ${bytes}%s")
+    }
+  }
+  private val inputTblPath = "file:///tpch-test-csv"
 
   def benchmark(config: Config): Unit = {
     val inputPath = 
-      config.test match { case x if x == "csvS3" || x == "tblS3" => "s3a://tpch-test" 
+      config.test match { case x if x == "csvS3" || x == "tblS3" => "s3a://tpch-test"
+                          case "tblFile" => "file:///tpch-data/tpch-test"
                           case x if x == "tblPartS3" => "s3a://tpch-test-part" 
                           case _ => inputTblPath }
 
@@ -193,16 +266,24 @@ object TpchQuery {
                                                 config.s3Options, config.fileType,
                                                 config.partitions)
     var totalMs: Long = 0
+    var results = new ListBuffer[TpchTestResult]
+    S3StoreCSV.resetTransferLength
     for (r <- 0 to config.repeat) {
-      for (i <- config.start to config.end) {
+      for (i <- config.testList) {
         val output = new ListBuffer[(String, Float)]
         println("Starting Q" + i)
         val start = System.currentTimeMillis()
         output ++= executeQueries(schemaProvider, i, config)
         val end = System.currentTimeMillis()
         val ms = (end - start)
-        totalMs += ms
-        val seconds = ms / 1000.0 //BigDecimal((end-start)/1000.0).setScale(3, BigDecimal.RoundingMode.HALF_DOWN).toFloat
+        if (r != 0) totalMs += ms
+        val seconds = ms / 1000.0
+        if (config.fileType == TBLFile) {
+          results += TpchTestResult(i, seconds, TpchSchemaProvider.transferBytes)
+        } else {
+          results += TpchTestResult(i, seconds, S3StoreCSV.getTransferLength)
+        }
+        S3StoreCSV.resetTransferLength
         println("Query Time " + seconds)
         val outFile = new File("TIMES" + i + ".txt")
         val bw = new BufferedWriter(new FileWriter(outFile, true))
@@ -212,6 +293,7 @@ object TpchQuery {
         }
 
         bw.close()
+        showResults(results)
       }
   }
   if (config.repeat > 1) {
