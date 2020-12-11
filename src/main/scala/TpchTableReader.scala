@@ -6,6 +6,7 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import scala.reflect.runtime.universe._
+import org.tpch.jdbc.TpchJdbc
 
 case class TpchS3Options(enableFilter: Boolean,
                          enableProject: Boolean,
@@ -60,6 +61,8 @@ object TpchTableReaderFile {
   private val sparkSession = SparkSession.builder
       .master("local[2]")
       .appName("TpchProvider")
+      // Force use of V2 data source.
+      .config("spark.sql.sources.useV1SourceList", "")
       .getOrCreate()
 
   def readTable[T: WeakTypeTag]
