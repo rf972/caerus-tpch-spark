@@ -6,17 +6,9 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import scala.reflect.runtime.universe._
+import org.tpch.filetype._
+import org.tpch.s3options._
 import org.tpch.jdbc.TpchJdbc
-
-case class TpchS3Options(enableFilter: Boolean,
-                         enableProject: Boolean,
-                         enableAggregate: Boolean,
-                         explain: Boolean) {
-
-    def isEnabled() : Boolean = {
-      enableFilter && enableProject && enableAggregate
-    }
-}
 
 object TpchTableReaderS3 {
   

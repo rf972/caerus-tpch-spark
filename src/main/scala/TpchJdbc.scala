@@ -10,6 +10,7 @@ import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SaveMode, SparkSession}
 import scala.reflect.runtime.universe._
 import org.tpch.tablereader._
+import org.tpch.s3options._
 // h2-latest.jar needed to run this test.
 
 object TpchJdbc {
@@ -61,7 +62,7 @@ object TpchJdbc {
       }
     }
   }
-  
+
   def setupDatabase(): Unit = {
     withConnection { conn =>
       conn.prepareStatement("CREATE SCHEMA \"tpch\"").executeUpdate()

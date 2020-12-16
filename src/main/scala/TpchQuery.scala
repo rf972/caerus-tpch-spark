@@ -13,11 +13,13 @@ import scala.reflect.runtime.universe._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import scopt.OParser
 import org.apache.hadoop.fs._
-import org.tpch.tablereader._
 import com.github.s3datasource.store._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.tpch.tablereader._
+import org.tpch.tablereader.hdfs._
+import org.tpch.filetype._
+import org.tpch.s3options._
 import org.tpch.jdbc.TpchJdbc
 
 /**
@@ -112,10 +114,12 @@ object TpchQuery {
 
     val query = Class.forName(f"main.scala.Q${queryNum}%02d")
                       .newInstance.asInstanceOf[TpchQuery]
+    val df = query.execute(sparkContext, schemaProvider)
     if (config.explain) {
-      query.execute(sparkContext, schemaProvider).explain(true)
+      df.explain(true)
+      //println("Num Partitions: " + df.rdd.partitions.length)
     }
-    outputDF(query.execute(sparkContext, schemaProvider), OUTPUT_DIR, query.getName(), config)
+    outputDF(df, OUTPUT_DIR, query.getName(), config)
 
     val t1 = System.nanoTime()
 
@@ -133,7 +137,7 @@ object TpchQuery {
     partitions: Int = 0,
     checkResults: Boolean = false,
     var fileType: FileType = CSVS3,
-    test: String = "csvS3",
+    test: String = "",
     var init: Boolean = false,
     var s3Options: TpchS3Options = new TpchS3Options(false, false, false, false),
     s3Select: Boolean = false,
@@ -163,7 +167,8 @@ object TpchQuery {
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
-          .text("test to run (csvS3, csvFile, tblS3, tblPartS3, tblFile, jdbc, init"),
+          .text("test to run (csvS3, csvFile, tblS3, tblPartS3, tblFile, jdbc, init," +
+                "tblHdfs, v1CsvHdfs, v2CsvHdfs"),
         opt[Unit]("s3Select")
           .action((x, c) => c.copy(s3Select = true))
           .text("Enable s3Select pushdown (filter, project), default is disabled."),
@@ -203,6 +208,9 @@ object TpchQuery {
             case "csvS3" => config.fileType = CSVS3
             case "csvFile" => config.fileType = CSVFile
             case "tblFile" => config.fileType = TBLFile
+            case "tblHdfs" => config.fileType = TBLHdfs
+            case "v1CsvHdfs" => config.fileType = V1CsvHdfs
+            case "v2CsvHdfs" => config.fileType = V2CsvHdfs
             case "tblS3" => config.fileType = TBLS3
             case "tblPartS3" => config.fileType = TBLS3
             case "jdbc" => config.fileType = JDBC
@@ -259,21 +267,38 @@ object TpchQuery {
               f" ${r.bytesTransferred}%20.0f, ${r.rows}%20.0f")
     }
   }
-
+  private val tpchPathMap = Map("jdbc" -> "file://tpch-data/tpch-test-jdbc",
+                                "tblFile" -> "file:///tpch-data/tpch-test",
+                                "s3" -> "s3a://tpch-test",
+                                "csvFile" -> "file:///tpch-data/tpch-test-csv",
+                                "tblPartS3" -> "s3a://tpch-test-part",
+                                "tblHdfs" -> "hdfs://dikehdfs:9000/tpch-test/",
+                                "csvHdfs" -> "hdfs://dikehdfs:9000/tpch-test-csv/")
+  def inputPath(config: Config) = {
+      config.test match { 
+        case x if x == "csvS3" || x == "tblS3" => tpchPathMap("s3")
+        case x@"jdbc"    => tpchPathMap(x)
+        case x@"tblFile" => tpchPathMap(x)
+        case x@"csvFile" => tpchPathMap(x)
+        case x@"tblHdfs" => tpchPathMap(x)
+        case x if x == "v1CsvHdfs" || x == "v2CsvHdfs" => tpchPathMap("csvHdfs")
+        case x if x == "tblPartS3" => tpchPathMap(x)
+      }
+  }
   def benchmark(config: Config): Unit = {
-    val inputPath = 
-      config.test match { case x if x == "csvS3" || x == "tblS3" => "s3a://tpch-test"
-                          case "jdbc"    => "file://tpch-data/tpch-test-jdbc"
-                          case "tblFile" => "file:///tpch-data/tpch-test"
-                          case "csvFile" => "file:///tpch-data/tpch-test-csv"
-                          case x if x == "tblPartS3" => "s3a://tpch-test-part"}
-
-    val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath, 
-                                                config.s3Options, config.fileType,
-                                                config.partitions)
     var totalMs: Long = 0
     var results = new ListBuffer[TpchTestResult]
+   
+   if (config.fileType == TBLHdfs ||
+       config.fileType == V1CsvHdfs ||
+       config.fileType == V2CsvHdfs) {
+     TpchTableReaderHdfs.init(config.fileType)
+   } else {
     S3StoreCSV.resetTransferLength
+   }
+    val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath(config), 
+                                                config.s3Options, config.fileType,
+                                                config.partitions)
     for (r <- 0 to config.repeat) {
       for (i <- config.testList) {
         val output = new ListBuffer[(String, Float)]
@@ -284,7 +309,12 @@ object TpchQuery {
         val ms = (end - start)
         if (r != 0) totalMs += ms
         val seconds = ms / 1000.0
-        if (config.fileType == TBLFile) {
+        if (config.fileType == TBLHdfs ||
+            config.fileType == V1CsvHdfs ||
+            config.fileType == V2CsvHdfs) {
+          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats.getBytesRead,
+                                    0)
+        } else if (config.fileType == TBLFile) {
           results += TpchTestResult(i, seconds, TpchSchemaProvider.transferBytes,
                                     TpchSchemaProvider.rows)
         } else {
@@ -354,6 +384,7 @@ object TpchQuery {
     println("fileType: " + config.fileType)
     println("start: " + config.start)
     println("end: " + config.end)
+
     if (config.quiet) {
       sparkContext.setLogLevel("WARN")
     } else if (config.verbose) {

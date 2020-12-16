@@ -7,6 +7,9 @@ import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import org.tpch.tablereader._
 import org.tpch.jdbc.TpchJdbc
+import org.tpch.filetype._
+import org.tpch.tablereader.hdfs._
+import org.tpch.s3options._
 
 // TPC-H table schemas
 case class Customer(
@@ -86,12 +89,6 @@ case class Supplier(
   s_acctbal: Double,
   s_comment: String)
 
-sealed trait FileType
-case object CSVS3 extends FileType
-case object CSVFile extends FileType
-case object TBLFile extends FileType
-case object TBLS3 extends FileType
-case object JDBC extends FileType
 
 class TpchSchemaProvider(sc: SparkContext, 
                          inputDir: String, 
@@ -143,6 +140,16 @@ class TpchSchemaProvider(sc: SparkContext,
           "part" -> TpchJdbc.readTable[Part]("part", inputDir, s3Select, partitions),
           "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
           "supplier" -> TpchJdbc.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
+    else if (fileType == V1CsvHdfs || fileType == V2CsvHdfs)
+      Map(
+          "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", inputDir, s3Select, partitions),
+          "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", inputDir, s3Select, partitions),
+          "nation" -> TpchTableReaderHdfs.readTable[Nation]("nation", inputDir, s3Select, partitions),
+          "region" -> TpchTableReaderHdfs.readTable[Region]("region", inputDir, s3Select, partitions),
+          "orders" -> TpchTableReaderHdfs.readTable[Order]("orders", inputDir, s3Select, partitions),
+          "part" -> TpchTableReaderHdfs.readTable[Part]("part", inputDir, s3Select, partitions),
+          "partsupp" -> TpchTableReaderHdfs.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
+          "supplier" -> TpchTableReaderHdfs.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
     else
       Map(
         "customer" -> sc.textFile(inputDir + "/customer.tbl*").map(l => {
