@@ -153,41 +153,41 @@ class TpchSchemaProvider(sc: SparkContext,
     else
       Map(
         "customer" -> sc.textFile(inputDir + "/customer.tbl*").map(l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Customer(p(0).trim.toLong, p(1).trim, p(2).trim, p(3).trim.toLong, p(4).trim,
                    p(5).trim.toDouble, p(6).trim, p(7).trim)}).toDF(),
         "lineitem" -> sc.textFile(inputDir + "/lineitem.tbl*").map(l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Lineitem(p(0).trim.toLong, p(1).trim.toLong, p(2).trim.toLong, p(3).trim.toLong, p(4).trim.toDouble, 
                    p(5).trim.toDouble, p(6).trim.toDouble, p(7).trim.toDouble, p(8).trim, p(9).trim,
                    p(10).trim, p(11).trim, p(12).trim, p(13).trim, p(14).trim, p(15).trim)}).toDF(),
         "nation" -> sc.textFile(inputDir + "/nation.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Nation(p(0).trim.toLong, p(1).trim, p(2).trim.toLong, p(3).trim)}).toDF(),
         "region" -> sc.textFile(inputDir + "/region.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Region(p(0).trim.toLong, p(1).trim, p(2).trim)}).toDF(),
         "orders" -> sc.textFile(inputDir + "/orders.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Order(p(0).trim.toLong, p(1).trim.toLong, p(2).trim, p(3).trim.toDouble, p(4).trim, 
                 p(5).trim, p(6).trim, p(7).trim.toLong, p(8).trim)}).toDF(),
         "part" -> sc.textFile(inputDir + "/part.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Part(p(0).trim.toLong, p(1).trim, p(2).trim, p(3).trim, p(4).trim, p(5).trim.toLong, p(6).trim,
                p(7).trim.toDouble, p(8).trim)}).toDF(),
         "partsupp" -> sc.textFile(inputDir + "/partsupp.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {
           Partsupp(p(0).trim.toLong, p(1).trim.toLong, p(2).trim.toLong, p(3).trim.toDouble, 
                    p(4).trim)}).toDF(),
         "supplier" -> sc.textFile(inputDir + "/supplier.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size ; TpchSchemaProvider.rows += 1
+          TpchSchemaProvider.transferBytes += l.size
           l.split('|')}).map(p => {          
           Supplier(p(0).trim.toLong, p(1).trim, p(2).trim, p(3).trim.toLong, p(4).trim, p(5).trim.toDouble,
                    p(6).trim)}).toDF())
@@ -209,5 +209,4 @@ class TpchSchemaProvider(sc: SparkContext,
 object TpchSchemaProvider {
 
   var transferBytes: Long = 0
-  var rows: Long = 0
 }

@@ -253,18 +253,17 @@ object TpchQuery {
   case class TpchTestResult (
     test: Integer,
     seconds: Double,
-    bytesTransferred: Double,
-    rows: Double )
+    bytesTransferred: Double)
 
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
     val formatter = java.text.NumberFormat.getIntegerInstance
     println("Test Results")
-    println("Test Time (sec) Bytes  Rows")
-    println("----------------------------")
+    println("Test    Time (sec)             Bytes")
+    println("------------------------------------")
     for (r <- results) {
       val bytes = formatter.format(r.bytesTransferred)
       println(f"${r.test}%4d, ${r.seconds}%10.3f," +
-              f" ${r.bytesTransferred}%20.0f, ${r.rows}%20.0f")
+              f" ${r.bytesTransferred}%20.0f")
     }
   }
   private val tpchPathMap = Map("jdbc" -> "file://tpch-data/tpch-test-jdbc",
@@ -312,14 +311,11 @@ object TpchQuery {
         if (config.fileType == TBLHdfs ||
             config.fileType == V1CsvHdfs ||
             config.fileType == V2CsvHdfs) {
-          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats.getBytesRead,
-                                    0)
+          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats.getBytesRead)
         } else if (config.fileType == TBLFile) {
-          results += TpchTestResult(i, seconds, TpchSchemaProvider.transferBytes,
-                                    TpchSchemaProvider.rows)
+          results += TpchTestResult(i, seconds, TpchSchemaProvider.transferBytes)
         } else {
-          results += TpchTestResult(i, seconds, S3StoreCSV.getTransferLength,
-                                    S3StoreCSV.getRows)
+          results += TpchTestResult(i, seconds, S3StoreCSV.getTransferLength)
         }
         S3StoreCSV.resetTransferLength
         println("Query Time " + seconds)
@@ -370,7 +366,7 @@ object TpchQuery {
     TpchJdbc.setupDatabase()
     for ((name, df) <- schemaProvider.dfMap) {
         TpchJdbc.writeDf(df, name, h2Database)
-        TpchJdbc.readDf(name).show()
+        //TpchJdbc.readDf(name).show()
     }
     println("Finished converting *.tbl to jdbc:h2 format")
   }
