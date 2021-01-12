@@ -140,16 +140,25 @@ class TpchSchemaProvider(sc: SparkContext,
           "part" -> TpchJdbc.readTable[Part]("part", inputDir, s3Select, partitions),
           "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
           "supplier" -> TpchJdbc.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
-    else if (fileType == V1CsvHdfs || fileType == V2CsvHdfs)
+    else if (fileType == V1CsvHdfs || fileType == V2CsvHdfs || fileType == CSVWebHdfs
+             || fileType == TBLHdfsDs || fileType == CSVHdfsDs)
       Map(
-          "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", inputDir, s3Select, partitions),
-          "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", inputDir, s3Select, partitions),
-          "nation" -> TpchTableReaderHdfs.readTable[Nation]("nation", inputDir, s3Select, partitions),
-          "region" -> TpchTableReaderHdfs.readTable[Region]("region", inputDir, s3Select, partitions),
-          "orders" -> TpchTableReaderHdfs.readTable[Order]("orders", inputDir, s3Select, partitions),
-          "part" -> TpchTableReaderHdfs.readTable[Part]("part", inputDir, s3Select, partitions),
-          "partsupp" -> TpchTableReaderHdfs.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
-          "supplier" -> TpchTableReaderHdfs.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
+          "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", inputDir, s3Select,
+                                                                partitions, fileType),
+          "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", inputDir, s3Select,
+                                                                partitions, fileType),
+          "nation" -> TpchTableReaderHdfs.readTable[Nation]("nation", inputDir, s3Select,
+                                                                partitions, fileType),
+          "region" -> TpchTableReaderHdfs.readTable[Region]("region", inputDir, s3Select,
+                                                                partitions, fileType),
+          "orders" -> TpchTableReaderHdfs.readTable[Order]("orders", inputDir, s3Select,
+                                                                partitions, fileType),
+          "part" -> TpchTableReaderHdfs.readTable[Part]("part", inputDir, s3Select,
+                                                                partitions, fileType),
+          "partsupp" -> TpchTableReaderHdfs.readTable[Partsupp]("partsupp", inputDir, s3Select,
+                                                                partitions, fileType),
+          "supplier" -> TpchTableReaderHdfs.readTable[Supplier]("supplier", inputDir, s3Select,
+                                                                partitions, fileType) )
     else
       Map(
         "customer" -> sc.textFile(inputDir + "/customer.tbl*").map(l => {

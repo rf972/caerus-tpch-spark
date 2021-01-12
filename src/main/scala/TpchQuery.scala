@@ -13,7 +13,7 @@ import scala.reflect.runtime.universe._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import scopt.OParser
 import org.apache.hadoop.fs._
-import com.github.s3datasource.store._
+import com.github.datasource.store._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.tpch.tablereader._
@@ -168,7 +168,8 @@ object TpchQuery {
           .required
           .action((x, c) => c.copy(test = x))
           .text("test to run (csvS3, csvFile, tblS3, tblPartS3, tblFile, jdbc, init," +
-                "tblHdfs, v1CsvHdfs, v2CsvHdfs"),
+                "tblHdfs, v1CsvHdfs, v2CsvHdfs, tblWebHdfs, csvWebHdfs, tblHdfsDs, " +
+                "csvHdfsDs"),
         opt[Unit]("s3Select")
           .action((x, c) => c.copy(s3Select = true))
           .text("Enable s3Select pushdown (filter, project), default is disabled."),
@@ -209,8 +210,12 @@ object TpchQuery {
             case "csvFile" => config.fileType = CSVFile
             case "tblFile" => config.fileType = TBLFile
             case "tblHdfs" => config.fileType = TBLHdfs
+            case "csvHdfsDs" => config.fileType = CSVHdfsDs
+            case "tblHdfsDs" => config.fileType = TBLHdfsDs
             case "v1CsvHdfs" => config.fileType = V1CsvHdfs
             case "v2CsvHdfs" => config.fileType = V2CsvHdfs
+            case "tblWebHdfs" => config.fileType = TBLWebHdfs
+            case "csvWebHdfs" => config.fileType = CSVWebHdfs
             case "tblS3" => config.fileType = TBLS3
             case "tblPartS3" => config.fileType = TBLS3
             case "jdbc" => config.fileType = JDBC
@@ -272,15 +277,22 @@ object TpchQuery {
                                 "csvFile" -> "file:///tpch-data/tpch-test-csv",
                                 "tblPartS3" -> "s3a://tpch-test-part",
                                 "tblHdfs" -> "hdfs://dikehdfs:9000/tpch-test/",
-                                "csvHdfs" -> "hdfs://dikehdfs:9000/tpch-test-csv/")
+                                "tblHdfsDs" -> "hdfs://tpch-test/",
+                                "csvHdfs" -> "hdfs://dikehdfs:9000/tpch-test-csv/",
+                                "csvHdfsDs" -> "hdfs://tpch-test-csv/",
+                                "tblWebHdfs" -> "webhdfs://dikehdfs:9870/tpch-test/",
+                                "csvWebHdfs" -> "webhdfs://dikehdfs:9870/tpch-test-csv/")
   def inputPath(config: Config) = {
       config.test match { 
         case x if x == "csvS3" || x == "tblS3" => tpchPathMap("s3")
         case x@"jdbc"    => tpchPathMap(x)
         case x@"tblFile" => tpchPathMap(x)
         case x@"csvFile" => tpchPathMap(x)
-        case x@"tblHdfs" => tpchPathMap(x)
-        case x if x == "v1CsvHdfs" || x == "v2CsvHdfs" => tpchPathMap("csvHdfs")
+        case x if x == "tblHdfs" || x == "tblHdfsDs" => tpchPathMap(x)
+        case x@"tblWebHdfs" => tpchPathMap(x)
+        case x@"csvWebHdfs" => tpchPathMap(x)
+        case x@"csvHdfsDs" => tpchPathMap(x)
+        case x if x == "v1CsvHdfs" || x == "v2CsvHdfs"=> tpchPathMap("csvHdfs")
         case x if x == "tblPartS3" => tpchPathMap(x)
       }
   }
@@ -289,8 +301,12 @@ object TpchQuery {
     var results = new ListBuffer[TpchTestResult]
    
    if (config.fileType == TBLHdfs ||
+       config.fileType == TBLWebHdfs ||
+       config.fileType == TBLHdfsDs ||
+       config.fileType == CSVWebHdfs ||
        config.fileType == V1CsvHdfs ||
-       config.fileType == V2CsvHdfs) {
+       config.fileType == V2CsvHdfs||
+       config.fileType == CSVHdfsDs) {
      TpchTableReaderHdfs.init(config.fileType)
    } else {
     S3StoreCSV.resetTransferLength
@@ -311,7 +327,12 @@ object TpchQuery {
         if (config.fileType == TBLHdfs ||
             config.fileType == V1CsvHdfs ||
             config.fileType == V2CsvHdfs) {
-          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats.getBytesRead)
+          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats("hdfs").getBytesRead)
+        } else if (config.fileType == TBLWebHdfs ||
+                   config.fileType == CSVWebHdfs ||
+                   config.fileType == TBLHdfsDs ||
+                   config.fileType == CSVHdfsDs) {
+          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats("webhdfs").getBytesRead)
         } else if (config.fileType == TBLFile) {
           results += TpchTestResult(i, seconds, TpchSchemaProvider.transferBytes)
         } else {

@@ -16,9 +16,9 @@ object TpchTableReaderS3 {
   private val sparkSession = SparkSession.builder
       .master("local[2]")
       .appName("TpchProvider")
-      .config("spark.datasource.s3.endpoint", s"""http://$s3IpAddr:9000""")
-      .config("spark.datasource.s3.accessKey", "admin")
-      .config("spark.datasource.s3.secretKey", "admin123")
+      .config("spark.datasource.pushdown.endpoint", s"""http://$s3IpAddr:9000""")
+      .config("spark.datasource.pushdown.accessKey", "admin")
+      .config("spark.datasource.pushdown.secretKey", "admin123")
       .getOrCreate()
 
   def readTable[T: WeakTypeTag]
@@ -28,7 +28,7 @@ object TpchTableReaderS3 {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     if (s3Options.isEnabled()) {
       val df = sparkSession.read
-        .format("com.github.s3datasource") // "org.apache.spark.sql.execution.datasources.v2.s3"
+        .format("com.github.datasource")
         .option("format", "csv")
         .option("partitions", partitions)
         .schema(schema)
@@ -36,7 +36,7 @@ object TpchTableReaderS3 {
         df
     } else {
       val df = sparkSession.read
-        .format("com.github.s3datasource")
+        .format("com.github.datasource")
         .option("format", "csv")
         .option("partitions", partitions)
         .option((if (s3Options.enableFilter) "Enable" else "Disable") + "FilterPush", "")
