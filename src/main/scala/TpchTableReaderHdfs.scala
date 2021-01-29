@@ -45,12 +45,15 @@ object TpchTableReaderHdfs {
     }
   }
   def init(fileType: FileType) : Unit = {
-    if (fileType == V2CsvHdfs) {
+    val hadoopConfig: Configuration = sparkSession.sparkContext.hadoopConfiguration
+    //hadoopConfig.set("fs.dikehdfs.impl", classOf[org.apache.hadoop.hdfs.web.DikeHdfsFileSystem].getName)
+    //println("set fs.dikehdfs.impl")
+    if (fileType == CSVHdfs) {
       // Force use of V2 data source.
       sparkSession.conf.set("spark.sql.sources.useV1SourceList", "")
     }
     if (fileType == TBLHdfsDs || fileType == CSVHdfsDs) {
-      sparkSession.conf.set("spark.datasource.pushdown.endpoint", "dikehdfs")
+      //sparkSession.conf.set("spark.datasource.pushdown.endpoint", "dikehdfs")
     }
     resetStats()
   }
@@ -60,29 +63,23 @@ object TpchTableReaderHdfs {
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     
-    if (fileType == TBLHdfsDs) {
+    if (!FileType.isDataSource(fileType)) {
+        //(fileType == CSVHdfs || fileType == CSVWebHdfs)
+      sparkSession.read
+        .format("csv")
+        .schema(schema)
+        .load(inputDir + "/" +  name + (if (FileType.isTbl(fileType)) ".tbl" else ".csv"))
+    } else {
       sparkSession.read
         .format("com.github.datasource")
-        .option("format", "csv")
+        .option("format", (if (FileType.isTblToDs(fileType)) "tbl" else "csv"))
         .schema(schema)
-        .option("partitions", partitions)
-        .load(inputDir + "/" +  name + ".tbl")
-    } else if (fileType == CSVHdfsDs) {
-      sparkSession.read
-        .format("com.github.datasource")
-        .option("format", "csv")
-        .schema(schema)
+        .option((if (FileType.isDisableProcessor(fileType)) "Disable" else "Enable") + "Processor", "")
         .option((if (s3Options.enableFilter) "Enable" else "Disable") + "FilterPush", "")
         .option((if (s3Options.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (s3Options.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .option("partitions", partitions)
-        .load(inputDir + "/" +  name + ".csv")
-    } else {
-        //(fileType == V1CsvHdfs || fileType == V2CsvHdfs || fileType == CSVWebHdfs)
-      sparkSession.read
-        .format("csv")
-        .schema(schema)
-        .load(inputDir + "/" +  name + ".csv")
+        .load(inputDir + "/" +  name + (if (FileType.isTbl(fileType)) ".tbl" else ".csv"))
     }
   }
 }
