@@ -140,8 +140,11 @@ class TpchSchemaProvider(sc: SparkContext,
           "part" -> TpchJdbc.readTable[Part]("part", inputDir, s3Select, partitions),
           "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
           "supplier" -> TpchJdbc.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
-    else if (fileType == V1CsvHdfs || fileType == V2CsvHdfs || fileType == CSVWebHdfs
-             || fileType == TBLHdfsDs || fileType == CSVHdfsDs)
+    else if (fileType == CSVHdfs || fileType == CSVWebHdfs
+             || fileType == TBLHdfsDs || fileType == CSVHdfsDs
+             || fileType == TBLWebHdfsDs || fileType == CSVWebHdfsDs
+             || fileType == TBLDikeHdfs || fileType == CSVDikeHdfs
+             || fileType == TBLDikeHdfsNoProc || fileType == CSVDikeHdfsNoProc)
       Map(
           "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", inputDir, s3Select,
                                                                 partitions, fileType),
