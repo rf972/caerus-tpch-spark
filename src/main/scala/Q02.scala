@@ -26,7 +26,7 @@ class Q02 extends TpchQuery {
 
     val brass = part.filter(part("p_size") === 15 && part("p_type").endsWith("BRASS"))
       .join(europe, europe("ps_partkey") === $"p_partkey")
-    //.cache
+      .cache
 
     val minCost = brass.groupBy(brass("ps_partkey"))
       .agg(min("ps_supplycost").as("min"))
