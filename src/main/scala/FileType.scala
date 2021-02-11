@@ -100,7 +100,7 @@ object FileType {
       || fileType == TBLDikeHdfs
       || fileType == CSVDikeHdfsNoProc
       || fileType == TBLDikeHdfsNoProc) {
-      "dikehdfs"
+      "ndphdfs"
     } else if (fileType == CSVFile
       || fileType == TBLFile) {
       "file"

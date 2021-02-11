@@ -303,10 +303,10 @@ object TpchQuery {
                                 "csvWebHdfsDs" -> "webhdfs://dikehdfs/tpch-test-csv/",
                                 "tblHdfs" -> "hdfs://dikehdfs:9000/tpch-test/",
                                 "csvHdfs" -> "hdfs://dikehdfs:9000/tpch-test-csv/",
-                                "tblDikeHdfs" -> "dikehdfs://dikehdfs/tpch-test/",
-                                "csvDikeHdfs" -> "dikehdfs://dikehdfs/tpch-test-csv/",
-                                "tblDikeHdfsNoProc" -> "dikehdfs://dikehdfs/tpch-test/",
-                                "csvDikeHdfsNoProc" -> "dikehdfs://dikehdfs/tpch-test-csv/",
+                                "tblDikeHdfs" -> "ndphdfs://dikehdfs/tpch-test/",
+                                "csvDikeHdfs" -> "ndphdfs://dikehdfs/tpch-test-csv/",
+                                "tblDikeHdfsNoProc" -> "ndphdfs://dikehdfs/tpch-test/",
+                                "csvDikeHdfsNoProc" -> "ndphdfs://dikehdfs/tpch-test-csv/",
                                 "tblWebHdfs" -> "webhdfs://dikehdfs/tpch-test/",
                                 "csvWebHdfs" -> "webhdfs://dikehdfs:9870/tpch-test-csv/")
   def inputPath(config: Config) = {
