@@ -44,7 +44,7 @@ object FileType {
    */
   def isTblToDs(fileType: FileType): Boolean = {
     if (fileType == TBLHdfsDs || fileType == TBLDikeHdfsNoProc
-      || fileType == TBLWebHdfsDs) {
+      || fileType == TBLWebHdfsDs || fileType == TBLDikeHdfs) {
       true
     } else {
       false
