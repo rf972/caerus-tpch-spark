@@ -27,7 +27,7 @@ class Q11 extends TpchQuery {
       .select($"s_suppkey")
       .join(partsupp, $"s_suppkey" === partsupp("ps_suppkey"))
       .select($"ps_partkey", mul($"ps_supplycost", $"ps_availqty").as("value"))
-    // .cache()
+      .cache()
 
     val sumRes = tmp.agg(sum("value").as("total_value"))
 

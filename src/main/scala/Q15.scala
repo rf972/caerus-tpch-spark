@@ -27,7 +27,7 @@ class Q15 extends TpchQuery {
       .select($"l_suppkey", decrease($"l_extendedprice", $"l_discount").as("value"))
       .groupBy($"l_suppkey")
       .agg(sum($"value").as("total"))
-    // .cache
+      .cache
 
     revenue.agg(max($"total").as("max_total"))
       .join(revenue, $"max_total" === revenue("total"))

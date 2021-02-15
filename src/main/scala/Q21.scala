@@ -24,10 +24,10 @@ class Q21 extends TpchQuery {
     val fsupplier = supplier.select($"s_suppkey", $"s_nationkey", $"s_name")
 
     val plineitem = lineitem.select($"l_suppkey", $"l_orderkey", $"l_receiptdate", $"l_commitdate")
-    //cache
+    plineitem.cache()
 
     val flineitem = plineitem.filter($"l_receiptdate" > $"l_commitdate")
-    // cache
+    flineitem.cache()
 
     val line1 = plineitem.groupBy($"l_orderkey")
       .agg(countDistinct($"l_suppkey").as("suppkey_count"), max($"l_suppkey").as("suppkey_max"))

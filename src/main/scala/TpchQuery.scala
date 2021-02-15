@@ -103,6 +103,7 @@ object TpchQuery {
     } else if (config.s3Project) {
       outputDir += "-PushdownProject"
     }
+    outputDir += "-W" + config.workers
     outputDir
   }
   def executeQueries(schemaProvider: TpchSchemaProvider, 
@@ -137,6 +138,7 @@ object TpchQuery {
     var testList: ArrayBuffer[Integer] = ArrayBuffer.empty[Integer],
     repeat: Int = 0,
     partitions: Int = 0,
+    workers: Int = 1,
     checkResults: Boolean = false,
     var fileType: FileType = CSVS3,
     test: String = "",
@@ -146,6 +148,7 @@ object TpchQuery {
     s3Filter: Boolean = false,
     s3Project: Boolean = false,
     s3Aggregate: Boolean = false,
+    debugData: Boolean = false,
     verbose: Boolean = false,
     explain: Boolean = false,
     quiet: Boolean = false,
@@ -167,6 +170,9 @@ object TpchQuery {
          opt[Int]('p', "partitions")
           .action((x, c) => c.copy(partitions = x.toInt))
           .text("partitions to use"),
+         opt[Int]('w', "workers")
+          .action((x, c) => c.copy(workers = x.toInt))
+          .text("workers being used"),
         opt[String]("test")
           .required
           .action((x, c) => c.copy(test = x))
@@ -201,6 +207,9 @@ object TpchQuery {
         opt[Unit]("normal")
           .action((x, c) => c.copy(normal = true))
           .text("Normal log output (INFO log level)."),
+        opt[Unit]("debugData")
+          .action((x, c) => c.copy(debugData = true))
+          .text("For debugging, copy the data output to file."),
         opt[Int]('r', "repeat")
           .action((x, c) => c.copy(repeat = x.toInt))
           .text("Number of times to repeat test"),
@@ -294,10 +303,10 @@ object TpchQuery {
                                 "csvWebHdfsDs" -> "webhdfs://dikehdfs/tpch-test-csv/",
                                 "tblHdfs" -> "hdfs://dikehdfs:9000/tpch-test/",
                                 "csvHdfs" -> "hdfs://dikehdfs:9000/tpch-test-csv/",
-                                "tblDikeHdfs" -> "dikehdfs://dikehdfs/tpch-test/",
-                                "csvDikeHdfs" -> "dikehdfs://dikehdfs/tpch-test-csv/",
-                                "tblDikeHdfsNoProc" -> "dikehdfs://dikehdfs/tpch-test/",
-                                "csvDikeHdfsNoProc" -> "dikehdfs://dikehdfs/tpch-test-csv/",
+                                "tblDikeHdfs" -> "ndphdfs://dikehdfs/tpch-test/",
+                                "csvDikeHdfs" -> "ndphdfs://dikehdfs/tpch-test-csv/",
+                                "tblDikeHdfsNoProc" -> "ndphdfs://dikehdfs/tpch-test/",
+                                "csvDikeHdfsNoProc" -> "ndphdfs://dikehdfs/tpch-test-csv/",
                                 "tblWebHdfs" -> "webhdfs://dikehdfs/tpch-test/",
                                 "csvWebHdfs" -> "webhdfs://dikehdfs:9870/tpch-test-csv/")
   def inputPath(config: Config) = {
@@ -306,9 +315,21 @@ object TpchQuery {
         case x => tpchPathMap(x)
       }
   }
+  def setDebugFile(config: Config, test: String) : Unit = {
+    if (config.debugData) {
+      val outputDir = "/build/tpch-results/data/"
+      val directory = new File(outputDir)
+      if (! directory.exists()) {
+        directory.mkdir()
+        println("creating data dir")
+      }
+      RowIterator.setDebugFile(outputDir + config.test + "-" + test)
+    }
+  }
   def benchmark(config: Config): Unit = {
     var totalMs: Long = 0
     var results = new ListBuffer[TpchTestResult]
+    val outputDir: String = getOutputDir(config)
    
     if (FileType.isHdfs(config.fileType)) {
       TpchTableReaderHdfs.init(config.fileType)
@@ -322,6 +343,7 @@ object TpchQuery {
       for (i <- config.testList) {
         val output = new ListBuffer[(String, Float)]
         println("Starting Q" + i)
+        setDebugFile(config, i.toString)
         val start = System.currentTimeMillis()
         output ++= executeQueries(schemaProvider, i, config)
         val end = System.currentTimeMillis()
@@ -394,9 +416,11 @@ object TpchQuery {
   def main(args: Array[String]): Unit = {
 
     var s3Select = false;
-    val config = parseArgs(args) 
+    val config = parseArgs(args)
+    println("args: " + args.mkString(" "))
     println("s3Select: " + config.s3Select)
     println("s3Options: " + config.s3Options)
+    println("workers: " + config.workers)
     println("test: " + config.test)
     println("fileType: " + config.fileType)
     println("start: " + config.start)

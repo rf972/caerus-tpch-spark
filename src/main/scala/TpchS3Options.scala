@@ -5,7 +5,7 @@ case class TpchS3Options(enableFilter: Boolean,
                          enableAggregate: Boolean,
                          explain: Boolean) {
 
-    def isEnabled() : Boolean = {
+    def isPushdownEnabled() : Boolean = {
       enableFilter && enableProject && enableAggregate
     }
 }

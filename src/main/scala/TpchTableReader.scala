@@ -26,7 +26,7 @@ object TpchTableReaderS3 {
                 s3Options: TpchS3Options, partitions: Int)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    if (s3Options.isEnabled()) {
+    if (s3Options.isPushdownEnabled()) {
       val df = sparkSession.read
         .format("com.github.datasource")
         .option("format", "csv")
