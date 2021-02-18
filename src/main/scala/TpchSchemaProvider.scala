@@ -95,10 +95,6 @@ class TpchSchemaProvider(sc: SparkContext,
                          s3Select: TpchS3Options,
                          fileType: FileType,
                          partitions: Int) {
-
-  // this is used to implicitly convert an RDD to a DataFrame.
-  val sqlContext = new org.apache.spark.sql.SQLContext(sc)
-  import sqlContext.implicits._
   val dfMap = 
     if (fileType == CSVS3) 
       Map(
@@ -110,16 +106,6 @@ class TpchSchemaProvider(sc: SparkContext,
           "part" -> TpchTableReaderS3.readTable[Part]("part.csv", inputDir, s3Select, partitions),
           "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.csv", inputDir, s3Select, partitions),
           "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.csv", inputDir, s3Select, partitions) )
-    else if (fileType == CSVFile) 
-      Map(
-          "customer" -> TpchTableReaderFile.readTable[Customer]("customer", inputDir),
-          "lineitem" -> TpchTableReaderFile.readTable[Lineitem]("lineitem", inputDir),
-          "nation" -> TpchTableReaderFile.readTable[Nation]("nation", inputDir),
-          "region" -> TpchTableReaderFile.readTable[Region]("region", inputDir),
-          "orders" -> TpchTableReaderFile.readTable[Order]("orders", inputDir),
-          "part" -> TpchTableReaderFile.readTable[Part]("part", inputDir),
-          "partsupp" -> TpchTableReaderFile.readTable[Partsupp]("partsupp", inputDir),
-          "supplier" -> TpchTableReaderFile.readTable[Supplier]("supplier", inputDir) )
     else if (fileType == TBLS3)
       Map(
           "customer" -> TpchTableReaderS3.readTable[Customer]("customer.tbl", inputDir, s3Select, partitions),
@@ -163,46 +149,16 @@ class TpchSchemaProvider(sc: SparkContext,
           "supplier" -> TpchTableReaderHdfs.readTable[Supplier]("supplier", inputDir, s3Select,
                                                                 partitions, fileType) )
     else
+      /* CSVFile, TBLFile, TBLHdfs */
       Map(
-        "customer" -> sc.textFile(inputDir + "/customer.tbl*").map(l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Customer(p(0).trim.toLong, p(1).trim, p(2).trim, p(3).trim.toLong, p(4).trim,
-                   p(5).trim.toDouble, p(6).trim, p(7).trim)}).toDF(),
-        "lineitem" -> sc.textFile(inputDir + "/lineitem.tbl*").map(l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Lineitem(p(0).trim.toLong, p(1).trim.toLong, p(2).trim.toLong, p(3).trim.toLong, p(4).trim.toDouble, 
-                   p(5).trim.toDouble, p(6).trim.toDouble, p(7).trim.toDouble, p(8).trim, p(9).trim,
-                   p(10).trim, p(11).trim, p(12).trim, p(13).trim, p(14).trim, p(15).trim)}).toDF(),
-        "nation" -> sc.textFile(inputDir + "/nation.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Nation(p(0).trim.toLong, p(1).trim, p(2).trim.toLong, p(3).trim)}).toDF(),
-        "region" -> sc.textFile(inputDir + "/region.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Region(p(0).trim.toLong, p(1).trim, p(2).trim)}).toDF(),
-        "orders" -> sc.textFile(inputDir + "/orders.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Order(p(0).trim.toLong, p(1).trim.toLong, p(2).trim, p(3).trim.toDouble, p(4).trim, 
-                p(5).trim, p(6).trim, p(7).trim.toLong, p(8).trim)}).toDF(),
-        "part" -> sc.textFile(inputDir + "/part.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Part(p(0).trim.toLong, p(1).trim, p(2).trim, p(3).trim, p(4).trim, p(5).trim.toLong, p(6).trim,
-               p(7).trim.toDouble, p(8).trim)}).toDF(),
-        "partsupp" -> sc.textFile(inputDir + "/partsupp.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {
-          Partsupp(p(0).trim.toLong, p(1).trim.toLong, p(2).trim.toLong, p(3).trim.toDouble, 
-                   p(4).trim)}).toDF(),
-        "supplier" -> sc.textFile(inputDir + "/supplier.tbl*").map( l => {
-          TpchSchemaProvider.transferBytes += l.size
-          l.split('|')}).map(p => {          
-          Supplier(p(0).trim.toLong, p(1).trim, p(2).trim, p(3).trim.toLong, p(4).trim, p(5).trim.toDouble,
-                   p(6).trim)}).toDF())
+          "customer" -> TpchTableReaderFile.readTable[Customer]("customer", inputDir, fileType),
+          "lineitem" -> TpchTableReaderFile.readTable[Lineitem]("lineitem", inputDir, fileType),
+          "nation" -> TpchTableReaderFile.readTable[Nation]("nation", inputDir, fileType),
+          "region" -> TpchTableReaderFile.readTable[Region]("region", inputDir, fileType),
+          "orders" -> TpchTableReaderFile.readTable[Order]("orders", inputDir, fileType),
+          "part" -> TpchTableReaderFile.readTable[Part]("part", inputDir, fileType),
+          "partsupp" -> TpchTableReaderFile.readTable[Partsupp]("partsupp", inputDir, fileType),
+          "supplier" -> TpchTableReaderFile.readTable[Supplier]("supplier", inputDir, fileType) )
 
   // for implicits
   val customer = dfMap.get("customer").get
