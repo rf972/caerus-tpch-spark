@@ -50,7 +50,9 @@ object TpchTableReaderHdfs {
     //println("set fs.dikehdfs.impl")
     if (fileType == CSVHdfs) {
       // Force use of V2 data source.
+      println("Using V2 Spark CSV Data Source.")
       sparkSession.conf.set("spark.sql.sources.useV1SourceList", "")
+      //sparkSession.conf.set("spark.sql.files.maxPartitionBytes", "1000000000000")
     }
     if (fileType == TBLHdfsDs || fileType == CSVHdfsDs) {
       //sparkSession.conf.set("spark.datasource.pushdown.endpoint", "dikehdfs")

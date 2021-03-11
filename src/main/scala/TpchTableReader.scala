@@ -9,6 +9,8 @@ import scala.reflect.runtime.universe._
 import org.tpch.filetype._
 import org.tpch.s3options._
 import org.tpch.jdbc.TpchJdbc
+import main.scala.TpchSchemaProvider
+import com.github.datasource.parse._
 
 object TpchTableReaderS3 {
   
@@ -56,16 +58,28 @@ object TpchTableReaderFile {
       // Force use of V2 data source.
       .config("spark.sql.sources.useV1SourceList", "")
       .getOrCreate()
+  // this is used to implicitly convert an RDD to a DataFrame.
+  val sparkContext = sparkSession.sparkContext
+  val sqlContext = new org.apache.spark.sql.SQLContext(sparkContext)
+  import sqlContext.implicits._
 
   def readTable[T: WeakTypeTag]
-               (name: String, inputDir: String)
+               (name: String, inputDir: String, fileType: FileType)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    val df = sparkSession.read
+    
+    if (fileType == CSVFile) {
+      sparkSession.read
         .format("csv")
         .schema(schema)
         .load(inputDir + "/" +  name + ".csv")
-        // df.show()
-        df
+    } else {
+      /* This will create a data frame out of a list of Row objects. 
+       */
+      sqlContext.createDataFrame(sparkContext.textFile(inputDir + "/" + name + ".tbl*").map(l => {
+          TpchSchemaProvider.transferBytes += l.size
+          RowIterator.parseLine(l, schema, '|')
+          }), StructType(schema))
+    }
   }
 }
