@@ -9,7 +9,7 @@ import org.tpch.tablereader._
 import org.tpch.jdbc.TpchJdbc
 import org.tpch.filetype._
 import org.tpch.tablereader.hdfs._
-import org.tpch.s3options._
+import org.tpch.pushdown.options.TpchPushdownOptions
 
 // TPC-H table schemas
 case class Customer(
@@ -92,61 +92,61 @@ case class Supplier(
 
 class TpchSchemaProvider(sc: SparkContext, 
                          inputDir: String, 
-                         s3Select: TpchS3Options,
+                         pushOpt: TpchPushdownOptions,
                          fileType: FileType,
                          partitions: Int) {
   val dfMap = 
     if (fileType == CSVS3) 
       Map(
-          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.csv", inputDir, s3Select, partitions),
-          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.csv", inputDir, s3Select, partitions),
-          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.csv", inputDir, s3Select, partitions),
-          "region" -> TpchTableReaderS3.readTable[Region]("region.csv", inputDir, s3Select, partitions),
-          "orders" -> TpchTableReaderS3.readTable[Order]("order.csv", inputDir, s3Select, partitions),
-          "part" -> TpchTableReaderS3.readTable[Part]("part.csv", inputDir, s3Select, partitions),
-          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.csv", inputDir, s3Select, partitions),
-          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.csv", inputDir, s3Select, partitions) )
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.csv", inputDir, pushOpt, partitions),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.csv", inputDir, pushOpt, partitions),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.csv", inputDir, pushOpt, partitions),
+          "region" -> TpchTableReaderS3.readTable[Region]("region.csv", inputDir, pushOpt, partitions),
+          "orders" -> TpchTableReaderS3.readTable[Order]("order.csv", inputDir, pushOpt, partitions),
+          "part" -> TpchTableReaderS3.readTable[Part]("part.csv", inputDir, pushOpt, partitions),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.csv", inputDir, pushOpt, partitions),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.csv", inputDir, pushOpt, partitions) )
     else if (fileType == TBLS3)
       Map(
-          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.tbl", inputDir, s3Select, partitions),
-          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.tbl", inputDir, s3Select, partitions),
-          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.tbl", inputDir, s3Select, partitions),
-          "region" -> TpchTableReaderS3.readTable[Region]("region.tbl", inputDir, s3Select, partitions),
-          "orders" -> TpchTableReaderS3.readTable[Order]("orders.tbl", inputDir, s3Select, partitions),
-          "part" -> TpchTableReaderS3.readTable[Part]("part.tbl", inputDir, s3Select, partitions),
-          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.tbl", inputDir, s3Select, partitions),
-          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.tbl", inputDir, s3Select, partitions) )
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.tbl", inputDir, pushOpt, partitions),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.tbl", inputDir, pushOpt, partitions),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.tbl", inputDir, pushOpt, partitions),
+          "region" -> TpchTableReaderS3.readTable[Region]("region.tbl", inputDir, pushOpt, partitions),
+          "orders" -> TpchTableReaderS3.readTable[Order]("orders.tbl", inputDir, pushOpt, partitions),
+          "part" -> TpchTableReaderS3.readTable[Part]("part.tbl", inputDir, pushOpt, partitions),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.tbl", inputDir, pushOpt, partitions),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.tbl", inputDir, pushOpt, partitions) )
     else if (fileType == JDBC)
       Map(
-          "customer" -> TpchJdbc.readTable[Customer]("customer", inputDir, s3Select, partitions),
-          "lineitem" -> TpchJdbc.readTable[Lineitem]("lineitem", inputDir, s3Select, partitions),
-          "nation" -> TpchJdbc.readTable[Nation]("nation", inputDir, s3Select, partitions),
-          "region" -> TpchJdbc.readTable[Region]("region", inputDir, s3Select, partitions),
-          "orders" -> TpchJdbc.readTable[Order]("orders", inputDir, s3Select, partitions),
-          "part" -> TpchJdbc.readTable[Part]("part", inputDir, s3Select, partitions),
-          "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", inputDir, s3Select, partitions),
-          "supplier" -> TpchJdbc.readTable[Supplier]("supplier", inputDir, s3Select, partitions) )
+          "customer" -> TpchJdbc.readTable[Customer]("customer", inputDir, pushOpt, partitions),
+          "lineitem" -> TpchJdbc.readTable[Lineitem]("lineitem", inputDir, pushOpt, partitions),
+          "nation" -> TpchJdbc.readTable[Nation]("nation", inputDir, pushOpt, partitions),
+          "region" -> TpchJdbc.readTable[Region]("region", inputDir, pushOpt, partitions),
+          "orders" -> TpchJdbc.readTable[Order]("orders", inputDir, pushOpt, partitions),
+          "part" -> TpchJdbc.readTable[Part]("part", inputDir, pushOpt, partitions),
+          "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", inputDir, pushOpt, partitions),
+          "supplier" -> TpchJdbc.readTable[Supplier]("supplier", inputDir, pushOpt, partitions) )
     else if (fileType == CSVHdfs || fileType == CSVWebHdfs
              || fileType == TBLHdfsDs || fileType == CSVHdfsDs
              || fileType == TBLWebHdfsDs || fileType == CSVWebHdfsDs
              || fileType == TBLDikeHdfs || fileType == CSVDikeHdfs
              || fileType == TBLDikeHdfsNoProc || fileType == CSVDikeHdfsNoProc)
       Map(
-          "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", inputDir, s3Select,
+          "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", inputDir, s3Select,
+          "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "nation" -> TpchTableReaderHdfs.readTable[Nation]("nation", inputDir, s3Select,
+          "nation" -> TpchTableReaderHdfs.readTable[Nation]("nation", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "region" -> TpchTableReaderHdfs.readTable[Region]("region", inputDir, s3Select,
+          "region" -> TpchTableReaderHdfs.readTable[Region]("region", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "orders" -> TpchTableReaderHdfs.readTable[Order]("orders", inputDir, s3Select,
+          "orders" -> TpchTableReaderHdfs.readTable[Order]("orders", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "part" -> TpchTableReaderHdfs.readTable[Part]("part", inputDir, s3Select,
+          "part" -> TpchTableReaderHdfs.readTable[Part]("part", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "partsupp" -> TpchTableReaderHdfs.readTable[Partsupp]("partsupp", inputDir, s3Select,
+          "partsupp" -> TpchTableReaderHdfs.readTable[Partsupp]("partsupp", inputDir, pushOpt,
                                                                 partitions, fileType),
-          "supplier" -> TpchTableReaderHdfs.readTable[Supplier]("supplier", inputDir, s3Select,
+          "supplier" -> TpchTableReaderHdfs.readTable[Supplier]("supplier", inputDir, pushOpt,
                                                                 partitions, fileType) )
     else
       /* CSVFile, TBLFile, TBLHdfs */
