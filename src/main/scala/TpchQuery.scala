@@ -20,7 +20,7 @@ import org.apache.spark.sql.types._
 import org.tpch.tablereader._
 import org.tpch.tablereader.hdfs._
 import org.tpch.filetype._
-import org.tpch.s3options._
+import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.jdbc.TpchJdbc
 
 /**
@@ -47,23 +47,29 @@ abstract class TpchQuery {
    */
   def execute(sc: SparkContext, tpchSchemaProvider: TpchSchemaProvider): DataFrame
 }
+
 object TpchQuery {
 
   private val sparkConf = new SparkConf().setAppName("Simple Application")
   private val sparkContext = new SparkContext(sparkConf)
-
+    
+  /** Writes the dataframe to disk.
+   *
+   *  @param df - the dataframe to output
+   *  @param outputDir - path to use in output
+   *  @param className - the name of the test class
+   *  @param config - The configuration of the tst.
+   *  @return String - Path to output results.
+   */
   def outputDF(df: DataFrame, outputDir: String, className: String,
                config: Config): Unit = {
 
     if (outputDir == null || outputDir == "")
       df.collect().foreach(println)
-    else {
-      //df.write.mode("overwrite").json(outputDir + "/" + className + ".out") // json to avoid alias
-      
+    else {      
       val castColumns = (df.schema.fields map { x =>
         if (x.dataType == DoubleType) {
           format_number(bround(col(x.name), 3), 2)
-          //col(x.name).cast(DecimalType(38,2))
         } else {
           col(x.name)
         }      
@@ -89,14 +95,20 @@ object TpchQuery {
     }
   }
 
+  /** Fetches the directory name to be used for output of the resultant
+   *  dataframe.
+   *
+   *  @param config - The configuration of the tst.
+   *  @return String - Path to output results.
+   */
   def getOutputDir(config: Config): String = { 
-    var outputDir = "file:///build/tpch-results/latest/" + config.test
+    var outputDir = "file:///build/tpch-results/latest/" + config.mode.toString
     if (config.partitions != 0) {
       outputDir += "-partitions-1"
     }
     if (config.s3Filter && config.s3Project) {
       outputDir += "-PushdownFilterProject"
-    } else if (config.s3Select) {
+    } else if (config.pushdown) {
       outputDir += "-PushdownAgg"
     } else if (config.s3Filter) {
       outputDir += "-PushdownFilter"
@@ -141,10 +153,14 @@ object TpchQuery {
     workers: Int = 1,
     checkResults: Boolean = false,
     var fileType: FileType = CSVS3,
-    test: String = "",
+    mode: String = "",  // The mode of the test.
+    format: String = "tbl",
+    datasource: String = "spark",
+    protocol: String = "hdfs",
+    filePart: Boolean = false,
     var init: Boolean = false,
-    var s3Options: TpchS3Options = new TpchS3Options(false, false, false, false),
-    s3Select: Boolean = false,
+    var pushdownOptions: TpchPushdownOptions = new TpchPushdownOptions(false, false, false, false),
+    pushdown: Boolean = false,
     s3Filter: Boolean = false,
     s3Project: Boolean = false,
     s3Aggregate: Boolean = false,
@@ -154,8 +170,120 @@ object TpchQuery {
     quiet: Boolean = false,
     normal: Boolean = false,
     kwargs: Map[String, String] = Map())
-  
-  val maxTests = 22
+
+  /** Validates and processes args related to the type of test.
+   *  One major piece we acomplish is determining the fileType,
+   *  which is a description of the type of test to perform,
+   *  which is used by the rest of the test.
+   *  
+   *  @param config - The program config to be validated.
+   *  @return Boolean - true if valid, false if invalid config.
+   */
+  def processTestMode(config: Config): Boolean = {
+    config.datasource match {
+      case "ndp" if (config.protocol == "s3" &&
+                     config.format == "csv") => config.fileType = CSVS3
+      case "spark" if (config.protocol == "file" &&
+                     config.format == "csv") => config.fileType = CSVFile
+      case "spark" if (config.protocol == "file" &&
+                     config.format == "tbl") => config.fileType = TBLFile
+      case "spark" if (config.protocol == "hdfs" &&
+                     config.format == "csv") => config.fileType = CSVHdfs
+      case "spark" if (config.protocol == "hdfs" &&
+                     config.format == "tbl") => config.fileType = TBLHdfs
+      case "ndp" if (config.protocol == "hdfs" &&
+                     config.format == "csv") => config.fileType = CSVHdfsDs
+      case "ndp" if (config.protocol == "hdfs" &&
+                     config.format == "tbl")  => config.fileType = TBLHdfsDs
+      case "ndp" if (config.protocol == "webhdfs" &&
+                     config.format == "csv") => config.fileType = CSVWebHdfsDs
+      case "ndp" if (config.protocol == "webhdfs" &&
+                     config.format == "tbl") => config.fileType = TBLWebHdfsDs
+      case "ndp" if (config.protocol == "ndphdfs" &&
+                     config.format == "csv") => config.fileType = CSVDikeHdfs
+      case "ndp" if (config.protocol == "ndphdfs" &&
+                     config.format == "tbl") => config.fileType = TBLDikeHdfs
+      case "spark" if (config.protocol == "webhdfs" &&
+                     config.format == "tbl") => config.fileType = TBLWebHdfs
+      case "spark" if (config.protocol == "webhdfs" &&
+                     config.format == "tbl") => config.fileType = CSVWebHdfs
+      case "ndp" if (config.protocol == "s3" && config.format == "tbl" && 
+                     config.filePart == true) => config.fileType = TBLS3
+      case "ndp" if (config.protocol == "s3" && config.format == "tbl") => config.fileType = TBLS3
+      case ds if config.mode == "jdbc" => config.fileType = JDBC
+      case ds if config.mode == "init" || config.mode == "initJdbc" => {
+        config.init = true
+        config.fileType = TBLFile
+      }
+      case test => println(s"Unknown test configuration: test: ${test} format: ${config.format} protocol: ${config.protocol}" +
+                           s" datasource: ${config.datasource}")
+                   return false
+    }
+    return true
+  }
+  /** Parse the test numbers argument and generate a list of integers
+   *  with the test numbers to run.
+   *  @param config - The configuration of the tst.
+   *  @return Boolean - true on success, false, validation failed.
+   */
+  def processTestNumbers(config: Config) : Boolean = {
+    if (config.testNumbers != "") {
+      val ranges = config.testNumbers.split(",")
+      for (r <- ranges) {
+        if (r.contains("-")) {
+          val numbers = r.split("-")
+          if (numbers.length == 2) {
+            for (i <- numbers(0).toInt to numbers(1).toInt) {
+              config.testList += i
+            }
+          }
+        } else {
+          val test = r.toInt
+          config.testList += test
+        }
+      }
+    }
+    for (t <- config.testList) {
+      if (t < 1 || t > 22) {
+        println(s"test numbers must be 1..22.  ${t} is not a valid test")
+        return false
+      }
+    }
+    true
+  }  
+  /** Parse the pushdown related arguments and generate
+   *  the config.pushdownOptions.
+   *
+   *  @param config - The configuration of the tst.
+   *  @return Unit
+   */
+  def processPushdownOptions(config: Config) : Unit = {
+    if (config.pushdown) {
+      config.pushdownOptions = TpchPushdownOptions(true, true, true, config.explain)
+    } else {
+      config.pushdownOptions = TpchPushdownOptions(config.s3Filter,
+                                                    config.s3Project,
+                                                    config.s3Aggregate,
+                                                    config.explain)
+    }
+  }
+  private val usageInfo = """The program has two main modes, one where we are using
+  *) --mode init or --mode initJdbc or --mode jdbc.  In this case
+     the test is initializing a database for example to
+     convert the database to .csv or to a JDBC format.
+  *) otherwise the program will be running the tpch benchmark
+     and the parameters below determine the test to run, and
+     with which configuration to use such as: 
+     --format (csv | tbl)
+     --protocol (file | s3 | hdfs | webhdfs | ndphdfs)
+     --datasource (spark | ndp)
+     -t (test number)"""
+  /** Parses all the test arguments and forms the
+   *  config object, which is used to convey the test parameters.
+   *  
+   *  @param args - The test arguments from the user.
+   *  @return Config - The object representing all program params.
+   */
   def parseArgs(args: Array[String]): Config = {
   
     val builder = OParser.builder[Config]
@@ -164,25 +292,69 @@ object TpchQuery {
       OParser.sequence(
         programName("TCPH Benchmark"),
         head("tpch-test", "0.1"),
-        opt[String]('n', "num")
+        note(usageInfo + sys.props("line.separator")),
+        opt[String]('t', "test")
           .action((x, c) => c.copy(testNumbers = x))
-          .text("test numbers"),
+          .valueName("<test number>")
+          .text("test numbers. e.g. 1,2-5,6,7,9-11,16-22"),
          opt[Int]('p', "partitions")
           .action((x, c) => c.copy(partitions = x.toInt))
+          .valueName("<number of partitions>")
           .text("partitions to use"),
          opt[Int]('w', "workers")
           .action((x, c) => c.copy(workers = x.toInt))
+          .valueName("<number of spark workers>")
           .text("workers being used"),
-        opt[String]("test")
-          .required
-          .action((x, c) => c.copy(test = x))
-          .text("test to run (csvS3, csvFile, tblS3, tblPartS3, tblFile, jdbc, init," +
-                "tblHdfs, csvHdfs, tblWebHdfs, csvWebHdfs, " +
-                "tblHdfsDs, csvHdfsDs, tblWebHdfsDs, csvWebHdfsDs " +
-                "tblDikeHdfs, csvDikeHdfs, tblDikeHdfsNoProc, csvDikeHdfsNoProc"),
-        opt[Unit]("s3Select")
-          .action((x, c) => c.copy(s3Select = true))
-          .text("Enable s3Select pushdown (filter, project), default is disabled."),
+        opt[String]("mode")
+          .action((x, c) => c.copy(mode = x))
+          .valueName("<test mode>")
+          .text("test mode (jdbc, init, initJdbc)")
+          .validate( mode =>
+            mode match {
+              case "jdbc" => success
+              case "init" => success
+              case _ => failure("mode must be jdbc, init or InitJdbc")
+            }),
+        opt[String]('f', "format")
+          .action((x, c) => c.copy(format = x))
+          .valueName("<file format>")
+          .text("file format to use (csv, tbl")
+          .validate(f =>
+            f match {
+              case "tbl" => success
+              case "csv"  => success
+              case format => failure(s"ERROR: format: ${format} not suported")
+            }),
+        opt[String]("datasource")
+          .abbr("ds")
+          .valueName("<datasource>")
+          .action((x, c) => c.copy(datasource = x))
+          .text("datasource to use (spark, ndp)")
+          .validate(datasource =>
+            datasource match {
+              case "spark" => success
+              case "ndp"  => success
+              case ds => failure(s"datasource: ${ds} not suported")
+            }),
+        opt[String]('r', "protocol")
+          .action((x, c) => c.copy(protocol = x))
+          .valueName("<protocol>")
+          .text("server protocol to use (file, s3, hdfs, webhdfs, ndphdfs)")
+          .validate(protocol =>
+            protocol match {
+              case "file" => success
+              case "s3" => success
+              case "hdfs" => success
+              case "webhdfs" => success
+              case "ndphdfs" => success
+              case protocol => failure(s"ERROR: protocol: ${protocol} not suported")
+            }),
+        opt[Unit]("filePart")
+          .action((x, c) => c.copy(filePart = true))
+          .text("Use file based partitioning."),
+        opt[Unit]("pushdown")
+          .action((x, c) => c.copy(pushdown = true))
+          .text("Enable all pushdowns (filter, project, aggregate), default is disabled."),
         opt[Unit]("s3Filter")
           .action((x, c) => c.copy(s3Filter = true))
           .text("Enable s3Select pushdown of filter, default is disabled."),
@@ -212,63 +384,29 @@ object TpchQuery {
           .text("For debugging, copy the data output to file."),
         opt[Int]('r', "repeat")
           .action((x, c) => c.copy(repeat = x.toInt))
+          .valueName("<repeat count>")
           .text("Number of times to repeat test"),
         help("help").text("prints this usage text"),
+        checkConfig(
+          c => {
+            var status: Boolean = processTestMode(c)
+            status &= processTestNumbers(c)
+            processPushdownOptions(c)
+            if (!status) {
+              failure("Validation failed.")
+            } else {
+              if ((c.mode == "") && (c.testNumbers == "")) {
+                failure("must select either --mode or --test")
+              } else {
+                success
+            }}})
       )
     }
     // OParser.parse returns Option[Config]
     val config = OParser.parse(parser1, args, Config())
-            
+    
     config match {
-        case Some(config) =>
-          config.test match {
-            case "csvS3" => config.fileType = CSVS3
-            case "csvFile" => config.fileType = CSVFile
-            case "tblFile" => config.fileType = TBLFile
-            case "csvHdfs" => config.fileType = CSVHdfs
-            case "tblHdfs" => config.fileType = TBLHdfs
-            case "csvHdfsDs"  => config.fileType = CSVHdfsDs
-            case "tblHdfsDs"  => config.fileType = TBLHdfsDs
-            case "csvWebHdfsDs"  => config.fileType = CSVWebHdfsDs
-            case "tblWebHdfsDs"  => config.fileType = TBLWebHdfsDs
-            case "csvDikeHdfs" => config.fileType = CSVDikeHdfs
-            case "tblDikeHdfs" => config.fileType = TBLDikeHdfs
-            case "csvDikeHdfsNoProc" => config.fileType = CSVDikeHdfsNoProc
-            case "tblDikeHdfsNoProc" => config.fileType = TBLDikeHdfsNoProc
-            case "tblWebHdfs" => config.fileType = TBLWebHdfs
-            case "csvWebHdfs" => config.fileType = CSVWebHdfs
-            case "tblS3" => config.fileType = TBLS3
-            case "tblPartS3" => config.fileType = TBLS3
-            case "jdbc" => config.fileType = JDBC
-            case test if test == "init" || test == "initJdbc" => {
-              config.init = true
-              config.fileType = TBLFile
-            }
-          }
-          if (config.testNumbers != "") {
-            val ranges = config.testNumbers.split(",")
-            for (r <- ranges) {
-              if (r.contains("-")) {
-                val numbers = r.split("-")
-                if (numbers.length == 2) {
-                  for (i <- numbers(0).toInt to numbers(1).toInt) {
-                    config.testList += i
-                  }
-                }
-              } else {
-                config.testList += r.toInt
-              }
-            }
-          }
-          if (config.s3Select) {
-            config.s3Options = TpchS3Options(true, true, true, config.explain)
-          } else {
-            config.s3Options = TpchS3Options(config.s3Filter,
-                                             config.s3Project,
-                                             config.s3Aggregate,
-                                             config.explain)
-          }
-          config
+        case Some(config) => config
         case _ =>
           // arguments are bad, error message will have been displayed
           System.exit(1)
@@ -281,6 +419,11 @@ object TpchQuery {
     seconds: Double,
     bytesTransferred: Double)
 
+  /** Shows the results from a ListBuffer[TpchTestResult]
+   *
+   * @param results - The test results.
+   * @return Unit
+   */
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
     val formatter = java.text.NumberFormat.getIntegerInstance
     println("Test Results")
@@ -292,29 +435,55 @@ object TpchQuery {
               f" ${r.bytesTransferred}%20.0f")
     }
   }
-  private val tpchPathMap = Map("jdbc" -> "file://tpch-data/tpch-test-jdbc",
-                                "tblFile" -> "file:///tpch-data/tpch-test",
-                                "s3" -> "s3a://tpch-test",
-                                "csvFile" -> "file:///tpch-data/tpch-test-csv",
-                                "tblPartS3" -> "s3a://tpch-test-part",
-                                "tblHdfsDs" -> "hdfs://dikehdfs/tpch-test/",
-                                "csvHdfsDs" -> "hdfs://dikehdfs/tpch-test-csv/",
-                                "tblWebHdfsDs" -> "webhdfs://dikehdfs/tpch-test/",
-                                "csvWebHdfsDs" -> "webhdfs://dikehdfs/tpch-test-csv/",
-                                "tblHdfs" -> "hdfs://dikehdfs:9000/tpch-test/",
-                                "csvHdfs" -> "hdfs://dikehdfs:9000/tpch-test-csv/",
-                                "tblDikeHdfs" -> "ndphdfs://dikehdfs/tpch-test/",
-                                "csvDikeHdfs" -> "ndphdfs://dikehdfs/tpch-test-csv/",
-                                "tblDikeHdfsNoProc" -> "ndphdfs://dikehdfs/tpch-test/",
-                                "csvDikeHdfsNoProc" -> "ndphdfs://dikehdfs/tpch-test-csv/",
-                                "tblWebHdfs" -> "webhdfs://dikehdfs/tpch-test/",
-                                "csvWebHdfs" -> "webhdfs://dikehdfs:9870/tpch-test-csv/")
+  /** Fetch the path to be used to input data.
+   *
+   *  @param config - The test configuration.
+   *  @return Unit
+   */
   def inputPath(config: Config) = {
-      config.test match {
-        case x if x == "csvS3" || x == "tblS3" => tpchPathMap("s3")
-        case x => tpchPathMap(x)
+      config.datasource match {
+        case ds if (ds == "spark" && config.format == "tbl" &&
+                    config.protocol == "file") => "file:///tpch-data/tpch-test"
+        case ds if (ds == "spark" && config.format == "csv" &&
+                    config.protocol == "file") => "file:///tpch-data/tpch-test-csv"
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.protocol == "hdfs") => "hdfs://dikehdfs/tpch-test/"
+        case ds if (ds == "ndp" && config.format == "csv" &&
+                    config.protocol == "hdfs") => "hdfs://dikehdfs/tpch-test-csv/"
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.protocol == "webhdfs") => "webhdfs://dikehdfs/tpch-test/"
+        case ds if (ds == "ndp" && config.format == "csv" &&
+                    config.protocol == "webhdfs") => "webhdfs://dikehdfs/tpch-test-csv/"
+                    
+        case ds if (ds == "spark" && config.format == "tbl" &&
+                    config.protocol == "hdfs") => "hdfs://dikehdfs:9000/tpch-test/"
+        case ds if (ds == "spark" && config.format == "csv" &&
+                    config.protocol == "hdfs") => "hdfs://dikehdfs:9000/tpch-test-csv/"
+        case ds if (ds == "spark" && config.format == "tbl" &&
+                    config.protocol == "webhdfs") => "webhdfs://dikehdfs:9870/tpch-test/"
+        case ds if (ds == "spark" && config.format == "csv" &&
+                    config.protocol == "webhdfs") => "webhdfs://dikehdfs:9870/tpch-test-csv/"
+
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.protocol == "ndphdfs") => "ndphdfs://dikehdfs/tpch-test/"
+        case ds if (ds == "ndp" && config.format == "csv" &&
+                    config.protocol == "ndphdfs") => "ndphdfs://dikehdfs/tpch-test-csv/"
+                    
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.filePart) => "s3a://tpch-test-part"
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.protocol == "s3") => "s3a://tpch-test"
+
+        case x if config.mode == "jdbc" => "file://tpch-data/tpch-test-jdbc"
       }
   }
+
+  /** Sets the file to be used to output when we are debugging data.
+   *
+   * @param config - test configuration.
+   * @param test - name of the test
+   * @return Unit
+   */
   def setDebugFile(config: Config, test: String) : Unit = {
     if (config.debugData) {
       val outputDir = "/build/tpch-results/data/"
@@ -323,9 +492,15 @@ object TpchQuery {
         directory.mkdir()
         println("creating data dir")
       }
-      RowIterator.setDebugFile(outputDir + config.test + "-" + test)
+      RowIterator.setDebugFile(outputDir + config.fileType.toString + "-" + test)
     }
   }
+
+  /** Runs the benchmark, and displayes the results.
+   *
+   * @param config - test configuration.
+   * @return Unit
+   */
   def benchmark(config: Config): Unit = {
     var totalMs: Long = 0
     var results = new ListBuffer[TpchTestResult]
@@ -336,8 +511,9 @@ object TpchQuery {
     } else {
      S3StoreCSV.resetTransferLength
     }
+    println(s"InputPath: ${inputPath(config)}")
     val schemaProvider = new TpchSchemaProvider(sparkContext, inputPath(config), 
-                                                config.s3Options, config.fileType,
+                                                config.pushdownOptions, config.fileType,
                                                 config.partitions)
     for (r <- 0 to config.repeat) {
       for (i <- config.testList) {
@@ -372,18 +548,23 @@ object TpchQuery {
         bw.close()
         showResults(results)
       }
+    }
+    if (config.repeat > 1) {
+      val averageSec = (totalMs / 1000.0) / config.repeat
+      println("Average Seconds per Test: " + averageSec)
+    }
   }
-  if (config.repeat > 1) {
-    val averageSec = (totalMs / 1000.0) / config.repeat
-    println("Average Seconds per Test: " + averageSec)
-  }
-}
 
   val initTblPath = "file:///tpch-data/tpch-test"
-  val h2Database = "file:///tpch-data/tpch-jdbc/tpch-h2-database"
+
+  /** Initializes a new database using csv.
+   *
+   * @param config - test configuration.
+   * @return Unit
+   */
   def init(config: Config): Unit = {
     val schemaProvider = new TpchSchemaProvider(sparkContext, initTblPath, 
-                                                config.s3Options, config.fileType,
+                                                config.pushdownOptions, config.fileType,
                                                 config.partitions)
     for ((name, df) <- schemaProvider.dfMap) {
       val outputFolder = "/build/tpch-data/" + name + "raw"
@@ -402,9 +583,17 @@ object TpchQuery {
     }
     println("Finished converting *.tbl to *.csv")
   }
+  /** Initializes a JDBC H2 database with content from a tpch database.
+   *  This reads in a database (for exmaple from .tbl files)
+   *  and then writes it out into the JDBC database.
+   *
+   * @param config - The configuration of the test.
+   * @return Unit
+   */
   def initJdbc(config: Config): Unit = {
+    val h2Database = "file:///tpch-data/tpch-jdbc/tpch-h2-database"
     val schemaProvider = new TpchSchemaProvider(sparkContext, initTblPath, 
-                                                config.s3Options, config.fileType,
+                                                config.pushdownOptions, config.fileType,
                                                 config.partitions)
     TpchJdbc.setupDatabase()
     for ((name, df) <- schemaProvider.dfMap) {
@@ -413,15 +602,21 @@ object TpchQuery {
     }
     println("Finished converting *.tbl to jdbc:h2 format")
   }
+
+  /** This is the main entry point of the program,
+   *  see above parseArgs for more usage information.
+   *
+   * @param config - The configuration of the test.
+   * @return Unit
+   */
   def main(args: Array[String]): Unit = {
 
-    var s3Select = false;
     val config = parseArgs(args)
     println("args: " + args.mkString(" "))
-    println("s3Select: " + config.s3Select)
-    println("s3Options: " + config.s3Options)
+    println("pushdown: " + config.pushdown)
+    println("pushdown options: " + config.pushdownOptions)
     println("workers: " + config.workers)
-    println("test: " + config.test)
+    println("mode: " + config.mode)
     println("fileType: " + config.fileType)
     println("start: " + config.start)
     println("end: " + config.end)
@@ -433,7 +628,7 @@ object TpchQuery {
     } else if (config.normal) {
       sparkContext.setLogLevel("INFO")
     }
-    config.test match {
+    config.mode match {
       case "init" => init(config)
       case "initJdbc" => initJdbc(config)
       case _ => benchmark(config)

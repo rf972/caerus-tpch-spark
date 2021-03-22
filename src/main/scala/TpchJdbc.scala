@@ -10,9 +10,11 @@ import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SaveMode, SparkSession}
 import scala.reflect.runtime.universe._
 import org.tpch.tablereader._
-import org.tpch.s3options._
-// h2-latest.jar needed to run this test.
+import org.tpch.pushdown.options.TpchPushdownOptions
 
+/** Allows for using JDBC with the tpch test.
+ *
+ */
 object TpchJdbc {
  
   private val clName = "org.apache.spark.sql.execution.datasources.v2.jdbc.JDBCTableCatalog"
@@ -36,7 +38,7 @@ object TpchJdbc {
   }
   def readTable[T: WeakTypeTag]
                (name: String, inputDir: String,
-                s3Options: TpchS3Options, partitions: Int)
+                pushOpt: TpchPushdownOptions, partitions: Int)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
       readDf(name)
   }
@@ -63,14 +65,14 @@ object TpchJdbc {
     }
   }
 
+  /** Creates a new database with the schema for the tpch test.
+   */
   def setupDatabase(): Unit = {
     withConnection { conn =>
       conn.prepareStatement("CREATE SCHEMA \"tpch\"").executeUpdate()
-      //conn.prepareStatement("DROP TABLE tpch.empty_table").executeUpdate()
       conn.prepareStatement(
         "CREATE TABLE \"tpch\".\"empty_table\" (name TEXT(32) NOT NULL, id INTEGER NOT NULL)")
         .executeUpdate()
-      //conn.prepareStatement("DROP TABLE \"tpch\".\"tpch.customer\"").executeUpdate()
       conn.prepareStatement(
         "CREATE TABLE \"tpch\".\"customer\" (c_custkey INTEGER, c_name TEXT(100), c_address TEXT(100)," +
         " c_nationkey INTEGER, c_phone TEXT(32), c_acctbal NUMERIC(20,2), c_mktsegment TEXT, c_comment TEXT)"
@@ -90,7 +92,6 @@ object TpchJdbc {
         "CREATE TABLE \"tpch\".\"partsupp\" (ps_partkey INTEGER, ps_suppkey INTEGER," +
         "  ps_availqty INTEGER, ps_supplycost NUMERIC(20,2), ps_comment TEXT)"
         ).executeUpdate()
-        //CREATE TABLE tpch.region (r_regionkey INTEGER, r_name TEXT,r_comment TEXT);
       conn.prepareStatement(
         "CREATE TABLE \"tpch\".\"region\" (r_regionkey INTEGER, r_name TEXT," + 
         " r_comment TEXT)").executeUpdate()
@@ -98,7 +99,6 @@ object TpchJdbc {
         "CREATE TABLE \"tpch\".\"supplier\" (s_suppkey INTEGER, s_name TEXT, s_address TEXT," +
         "  s_nationkey INTEGER, s_phone TEXT, s_acctbal NUMERIC(20,2), s_comment TEXT)"
         ).executeUpdate()
-      //conn.prepareStatement("DROP TABLE \"tpch\".\"tpch.lineitem\"").executeUpdate()
       conn.prepareStatement(
         "CREATE TABLE \"tpch\".\"lineitem\" (l_orderkey INTEGER,l_partkey INTEGER,l_suppkey INTEGER," +
         " l_linenumber INTEGER,l_quantity NUMERIC(20,2),l_extendedprice NUMERIC(20,2)," +
@@ -106,10 +106,6 @@ object TpchJdbc {
         " l_shipdate TEXT,l_commitdate TEXT,l_receiptdate TEXT,l_shipinstruct TEXT,l_shipmode TEXT," +
         " l_comment TEXT)"
         ).executeUpdate()
-      /*  conn.prepareStatement("INSERT INTO \"tpch\".\"lineitem\" VALUES (1, 2, 3, 4, 5.0, 6.0, 7.0, " +
-                              "8.0, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h')").executeUpdate()
-        conn.prepareStatement("INSERT INTO \"tpch\".\"region\" VALUES (1, 'a', 'b')")
-        .executeUpdate() */
     }
   }
 }
