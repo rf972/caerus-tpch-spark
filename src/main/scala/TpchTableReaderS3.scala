@@ -15,37 +15,45 @@ import com.github.datasource.parse._
 object TpchTableReaderS3 {
   
   private val s3IpAddr = "minioserver"
-  private val sparkSession = SparkSession.builder
+  private val spark = SparkSession.builder
       .master("local[2]")
       .appName("TpchProvider")
       .config("spark.datasource.pushdown.endpoint", s"""http://$s3IpAddr:9000""")
       .config("spark.datasource.pushdown.accessKey", "admin")
       .config("spark.datasource.pushdown.secretKey", "admin123")
       .getOrCreate()
-
+      
+  def enableOptions(name: String): Unit = {
+    name match {
+      case "minio" => {
+        spark.conf.set("spark.datasource.pushdown.DisableGroupbyPush", "")
+        spark.conf.set("spark.datasource.pushdown.DisableSupportsIsNull", "")
+      }
+    }
+  }
   def readTable[T: WeakTypeTag]
-               (name: String, inputDir: String,
-                pushOpt: TpchPushdownOptions, partitions: Int)
+               (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    if (pushOpt.isPushdownEnabled()) {
-      val df = sparkSession.read
+  
+    if (params.pushOpt.isPushdownEnabled()) {
+      val df = spark.read
         .format("com.github.datasource")
         .option("format", "csv")
-        .option("partitions", partitions)
+        .option("partitions", params.partitions)
         .schema(schema)
-        .load(inputDir + "/" +  name)
+        .load(params.inputDir + "/" +  name + {if (params.filePart) "/" + "" else ""})
         df
     } else {
-      val df = sparkSession.read
+      val df = spark.read
         .format("com.github.datasource")
         .option("format", "csv")
-        .option("partitions", partitions)
-        .option((if (pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
-        .option((if (pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
-        .option((if (pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
+        .option("partitions", params.partitions)
+        .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
+        .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
+        .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .schema(schema)
-        .load(inputDir + "/" +  name)
+        .load(params.inputDir + "/" + name + {if (params.filePart) "/" + "part-" else ""})
         df
     }
   }

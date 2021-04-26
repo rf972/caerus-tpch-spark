@@ -29,19 +29,20 @@ object TpchTableReaderFile {
   import sqlContext.implicits._
 
   def readTable[T: WeakTypeTag]
-               (name: String, inputDir: String, fileType: FileType)
+               (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     
-    if (fileType == CSVFile) {
+    if (params.fileType == CSVFile) {
       sparkSession.read
         .format("csv")
         .schema(schema)
-        .load(inputDir + "/" +  name + ".csv")
+        .load(params.inputDir + "/" +  name + ".csv")
     } else {
       /* This will create a data frame out of a list of Row objects. 
        */
-      sqlContext.createDataFrame(sparkContext.textFile(inputDir + "/" + name + ".tbl*").map(l => {
+      sqlContext.createDataFrame(sparkContext.textFile(
+        params.inputDir + "/" + name + ".tbl*").map(l => {
           TpchSchemaProvider.transferBytes += l.size
           RowIterator.parseLine(l, schema, '|')
           }), StructType(schema))

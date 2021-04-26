@@ -37,8 +37,7 @@ object TpchJdbc {
     }
   }
   def readTable[T: WeakTypeTag]
-               (name: String, inputDir: String,
-                pushOpt: TpchPushdownOptions, partitions: Int)
+               (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
       readDf(name)
   }
