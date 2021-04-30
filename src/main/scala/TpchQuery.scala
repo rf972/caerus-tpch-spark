@@ -114,13 +114,13 @@ object TpchQuery {
     if (config.filePart) {
       outputDir += "-filePart"
     }
-    if (config.s3Filter && config.s3Project) {
+    if (config.pushFilter && config.pushProject) {
       outputDir += "-PushdownFilterProject"
     } else if (config.pushdown) {
       outputDir += "-PushdownAgg"
-    } else if (config.s3Filter) {
+    } else if (config.pushFilter) {
       outputDir += "-PushdownFilter"
-    } else if (config.s3Project) {
+    } else if (config.pushProject) {
       outputDir += "-PushdownProject"
     }
     outputDir += "-W" + config.workers
@@ -169,9 +169,9 @@ object TpchQuery {
     filePart: Boolean = false,
     var pushdownOptions: TpchPushdownOptions = new TpchPushdownOptions(false, false, false, false),
     pushdown: Boolean = false,
-    s3Filter: Boolean = false,
-    s3Project: Boolean = false,
-    s3Aggregate: Boolean = false,
+    pushFilter: Boolean = false,
+    pushProject: Boolean = false,
+    pushAggregate: Boolean = false,
     debugData: Boolean = false,
     verbose: Boolean = false,
     explain: Boolean = false,
@@ -269,9 +269,9 @@ object TpchQuery {
     if (config.pushdown) {
       config.pushdownOptions = TpchPushdownOptions(true, true, true, config.explain)
     } else {
-      config.pushdownOptions = TpchPushdownOptions(config.s3Filter,
-                                                    config.s3Project,
-                                                    config.s3Aggregate,
+      config.pushdownOptions = TpchPushdownOptions(config.pushFilter,
+                                                    config.pushProject,
+                                                    config.pushAggregate,
                                                     config.explain)
     }
   }
@@ -372,15 +372,15 @@ object TpchQuery {
         opt[Unit]("pushdown")
           .action((x, c) => c.copy(pushdown = true))
           .text("Enable all pushdowns (filter, project, aggregate), default is disabled."),
-        opt[Unit]("s3Filter")
-          .action((x, c) => c.copy(s3Filter = true))
-          .text("Enable s3Select pushdown of filter, default is disabled."),
-        opt[Unit]("s3Project")
-          .action((x, c) => c.copy(s3Project = true))
-          .text("Enable s3Select pushdown of project, default is disabled."),
-        opt[Unit]("s3Aggregate")
-          .action((x, c) => c.copy(s3Aggregate = true))
-          .text("Enable s3Select pushdown of aggregate, default is disabled."),
+        opt[Unit]("pushFilter")
+          .action((x, c) => c.copy(pushFilter = true))
+          .text("Enable pushdown of filter, default is disabled."),
+        opt[Unit]("pushProject")
+          .action((x, c) => c.copy(pushProject = true))
+          .text("Enable pushdown of project, default is disabled."),
+        opt[Unit]("pushAggregate")
+          .action((x, c) => c.copy(pushAggregate = true))
+          .text("Enable pushdown of aggregate, default is disabled."),
         opt[Unit]("check")
           .action((x, c) => c.copy(checkResults = true))
           .text("Enable checking of results."),
@@ -452,6 +452,7 @@ object TpchQuery {
               f" ${r.bytesTransferred}%20.0f")
     }
   }
+  private val hdfsServer = "dikehdfs"
   /** Fetch the path to be used to input data.
    *
    *  @param config - The test configuration.
@@ -464,27 +465,27 @@ object TpchQuery {
         case ds if (ds == "spark" && config.format == "csv" &&
                     config.protocol == "file") => "file:///tpch-data/tpch-test-csv"
         case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "hdfs") => "hdfs://dikehdfs/tpch-test/"
+                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "hdfs") => "hdfs://dikehdfs/tpch-test-csv/"
+                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test-csv/"
         case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "webhdfs") => "webhdfs://dikehdfs/tpch-test/"
+                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "webhdfs") => "webhdfs://dikehdfs/tpch-test-csv/"
+                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test-csv/"
                     
         case ds if (ds == "spark" && config.format == "tbl" &&
-                    config.protocol == "hdfs") => "hdfs://dikehdfs:9000/tpch-test/"
+                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test/"
         case ds if (ds == "spark" && config.format == "csv" &&
-                    config.protocol == "hdfs") => "hdfs://dikehdfs:9000/tpch-test-csv/"
+                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test-csv/"
         case ds if (ds == "spark" && config.format == "tbl" &&
-                    config.protocol == "webhdfs") => "webhdfs://dikehdfs:9870/tpch-test/"
+                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}:9870/tpch-test/"
         case ds if (ds == "spark" && config.format == "csv" &&
-                    config.protocol == "webhdfs") => "webhdfs://dikehdfs:9870/tpch-test-csv/"
+                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}:9870/tpch-test-csv/"
 
         case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "ndphdfs") => "ndphdfs://dikehdfs/tpch-test/"
+                    config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "ndphdfs") => "ndphdfs://dikehdfs/tpch-test-csv/"
+                    config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test-csv/"
 
         case ds if (ds == "ndp" && config.format == "tbl" &&
                     config.filePart) => "s3a://tpch-test-part"
@@ -592,7 +593,7 @@ object TpchQuery {
   def getOutputPath(config: Config): String = {
 
     config.protocol match {
-      case "hdfs" => "hdfs://hadoop-ndp:9000/"
+      case "hdfs" => s"hdfs://${hdfsServer}:9000/"
       case "file" => "file:///tpch-data/"
       case _ => ""
     }

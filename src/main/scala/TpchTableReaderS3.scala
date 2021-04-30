@@ -42,7 +42,7 @@ object TpchTableReaderS3 {
         .option("format", "csv")
         .option("partitions", params.partitions)
         .schema(schema)
-        .load(params.inputDir + "/" +  name + {if (params.filePart) "/" + "" else ""})
+        .load(params.inputDir + "/" +  name + {if (params.filePart) "/" else ""})
         df
     } else {
       val df = spark.read
@@ -53,7 +53,7 @@ object TpchTableReaderS3 {
         .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .schema(schema)
-        .load(params.inputDir + "/" + name + {if (params.filePart) "/" + "part-" else ""})
+        .load(params.inputDir + "/" + name + {if (params.filePart) "/" else ""})
         df
     }
   }
