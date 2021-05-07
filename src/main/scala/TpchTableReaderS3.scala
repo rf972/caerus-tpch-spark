@@ -28,6 +28,7 @@ object TpchTableReaderS3 {
       case "minio" => {
         spark.conf.set("spark.datasource.pushdown.DisableGroupbyPush", "")
         spark.conf.set("spark.datasource.pushdown.DisableSupportsIsNull", "")
+        spark.conf.set("spark.datasource.pushdown.DisabledCasts", "NUMERIC")
       }
     }
   }
