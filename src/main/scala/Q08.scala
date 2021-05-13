@@ -1,6 +1,8 @@
 package main.scala
 
 import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.defineMacros._
+import org.apache.spark.sql.functions.callUDF
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.functions.sum
 import org.apache.spark.sql.functions.udf
@@ -19,6 +21,11 @@ class Q08 extends TpchQuery {
     import sqlContext.implicits._
     import schemaProvider._
 
+    if (schemaProvider.pushUDF) {
+      schemaProvider.spark.registerMacro("decreaseUDF", spark.udm((x: Double, y: Double) => {
+        x * (1 - y)
+      }))
+    }
     val getYear = udf { (x: String) => x.substring(0, 4) }
     val decrease = udf { (x: Double, y: Double) => x * (1 - y) }
     val isBrazil = udf { (x: String, y: Double) => if (x == "BRAZIL") y else 0 }
@@ -29,10 +36,17 @@ class Q08 extends TpchQuery {
 
     val nat = nation.join(supplier, $"n_nationkey" === supplier("s_nationkey"))
 
-    val line = lineitem.select($"l_partkey", $"l_suppkey", $"l_orderkey",
-      decrease($"l_extendedprice", $"l_discount").as("volume")).
-      join(fpart, $"l_partkey" === fpart("p_partkey"))
-      .join(nat, $"l_suppkey" === nat("s_suppkey"))
+    val line = if (schemaProvider.pushUDF) {
+      lineitem.select($"l_partkey", $"l_suppkey", $"l_orderkey",
+        callUDF("decreaseUDF", $"l_extendedprice", $"l_discount").as("volume"))
+        .join(fpart, $"l_partkey" === fpart("p_partkey"))
+        .join(nat, $"l_suppkey" === nat("s_suppkey"))
+    } else {
+      lineitem.select($"l_partkey", $"l_suppkey", $"l_orderkey",
+        decrease($"l_extendedprice", $"l_discount").as("volume")).
+        join(fpart, $"l_partkey" === fpart("p_partkey"))
+        .join(nat, $"l_suppkey" === nat("s_suppkey"))
+    }
 
     nation.join(fregion, $"n_regionkey" === fregion("r_regionkey"))
       .select($"n_nationkey")

@@ -160,6 +160,10 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
   dfMap.foreach {
     case (key, value) => value.createOrReplaceTempView(key)
   }
+  val pushUDF = params.pushOpt.enableUDF
+  val spark = SparkSession.builder
+      .appName("TpchProvider")
+      .getOrCreate()
 }
 
 object TpchSchemaProvider {

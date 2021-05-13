@@ -167,8 +167,10 @@ object TpchQuery {
     datasource: String = "spark",
     protocol: String = "file",
     filePart: Boolean = false,
-    var pushdownOptions: TpchPushdownOptions = new TpchPushdownOptions(false, false, false, false),
+    var pushdownOptions: TpchPushdownOptions =
+        new TpchPushdownOptions(false, false, false, false, false),
     pushdown: Boolean = false,
+    pushUDF: Boolean = false,
     pushFilter: Boolean = false,
     pushProject: Boolean = false,
     pushAggregate: Boolean = false,
@@ -266,13 +268,17 @@ object TpchQuery {
    *  @return Unit
    */
   def processPushdownOptions(config: Config) : Unit = {
-    if (config.pushdown) {
-      config.pushdownOptions = TpchPushdownOptions(true, true, true, config.explain)
+
+    if (config.pushUDF) {
+      config.pushdownOptions = TpchPushdownOptions(true, true, true, true, config.explain)
+    } else if (config.pushdown) {
+      config.pushdownOptions = TpchPushdownOptions(true, true, true, false, config.explain)
     } else {
       config.pushdownOptions = TpchPushdownOptions(config.pushFilter,
-                                                    config.pushProject,
-                                                    config.pushAggregate,
-                                                    config.explain)
+                                                   config.pushProject,
+                                                   config.pushAggregate,
+                                                   config.pushUDF,
+                                                   config.explain)
     }
   }
   private val usageInfo = """The program has two main modes, one where we are using
@@ -381,6 +387,9 @@ object TpchQuery {
         opt[Unit]("pushAggregate")
           .action((x, c) => c.copy(pushAggregate = true))
           .text("Enable pushdown of aggregate, default is disabled."),
+        opt[Unit]("pushUDF")
+          .action((x, c) => c.copy(pushUDF = true))
+          .text("Enable pushdown of User Defined Functions, default is disabled."),
         opt[Unit]("check")
           .action((x, c) => c.copy(checkResults = true))
           .text("Enable checking of results."),
