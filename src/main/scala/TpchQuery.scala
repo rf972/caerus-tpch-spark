@@ -13,6 +13,7 @@ import scala.reflect.runtime.universe._
 import com.github.datasource.s3.S3StoreCSV
 import com.github.datasource.parse._
 import org.apache.hadoop.fs._
+import org.tpch.config.Config
 import org.tpch.filetype._
 import org.tpch.jdbc.TpchJdbc
 import org.tpch.pushdown.options.TpchPushdownOptions
@@ -27,6 +28,14 @@ import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 
+case class TpchTestResult(test: String,
+                          seconds: Double,
+                          bytesTransferred: Double,
+                          var utilization: Double = 0)
+
+object TpchTestResult {
+  def empty: Unit = new TpchTestResult("", 0, 0)
+}
 /**
  * Parent class for TPC-H queries.
  *
@@ -114,6 +123,9 @@ object TpchQuery {
     if (config.filePart) {
       outputDir += "-filePart"
     }
+    if (config.options != "") {
+      outputDir += s"-${config.options}"
+    }
     if (config.pushFilter && config.pushProject) {
       outputDir += "-PushdownFilterProject"
     } else if (config.pushdown) {
@@ -126,60 +138,87 @@ object TpchQuery {
     outputDir += "-W" + config.workers
     outputDir
   }
-  def executeQueries(schemaProvider: TpchSchemaProvider, 
+  def runQuery(schemaProvider: TpchSchemaProvider, 
                      queryNum: Int,
-                     config: Config): ListBuffer[(String, Float)] = {
-
+                     config: Config): TpchTestResult = {
     
-    val results = new ListBuffer[(String, Float)]
     val outputDir: String = getOutputDir(config)
-    val t0 = System.nanoTime()
-
-    val query = Class.forName(f"main.scala.Q${queryNum}%02d")
-                      .newInstance.asInstanceOf[TpchQuery]
+    val query = Class.forName(f"main.scala.Q${queryNum}%02d")   
+                     .newInstance.asInstanceOf[TpchQuery]
     val df = query.execute(sparkContext, schemaProvider)
+    val t0 = System.nanoTime()
     if (config.explain) {
       df.explain(true)
       //println("Num Partitions: " + df.rdd.partitions.length)
     }
+    println("Starting " + query.getName())
     outputDF(df, outputDir, query.getName(), config)
-
-    val t1 = System.nanoTime()
-
-    val elapsed = (t1 - t0) / 1000000000.0f // second
-    results += new Tuple2(query.getName(), elapsed)
-    return results
+    var t1 = System.nanoTime()
+    val seconds = (t1 - t0) / 1000000000.0f // second
+    val statsType = FileType.getStatsType(config.fileType)
+    val result = {
+      if (statsType.contains("hdfs")) {
+        TpchTestResult(query.getName(), seconds, TpchTableReaderHdfs.getStats(statsType).getBytesRead)
+      } else if (statsType == "file") {
+        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes)
+      } else if (statsType == "s3") {
+        TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength)
+      } else {
+        TpchTestResult(query.getName(), seconds, 0)
+      }
+    }
+    S3StoreCSV.resetTransferLength
+    println("Query Time " + seconds)
+    result
   }
-
-  case class Config(
-    var start: Int = 0,
-    testNumbers: String = "",
-    var end: Int = -1,
-    var testList: ArrayBuffer[Integer] = ArrayBuffer.empty[Integer],
-    repeat: Int = 0,
-    partitions: Int = 0,
-    options: String = "",
-    workers: Int = 1,
-    checkResults: Boolean = false,
-    var fileType: FileType = CSVS3,
-    mode: String = "",  // The mode of the test.
-    format: String = "tbl",
-    datasource: String = "spark",
-    protocol: String = "file",
-    filePart: Boolean = false,
-    var pushdownOptions: TpchPushdownOptions =
-        new TpchPushdownOptions(false, false, false, false, false),
-    pushdown: Boolean = false,
-    pushUDF: Boolean = false,
-    pushFilter: Boolean = false,
-    pushProject: Boolean = false,
-    pushAggregate: Boolean = false,
-    debugData: Boolean = false,
-    verbose: Boolean = false,
-    explain: Boolean = false,
-    quiet: Boolean = false,
-    normal: Boolean = false,
-    kwargs: Map[String, String] = Map())
+  def executeQueries(schemaProvider: TpchSchemaProvider, 
+                     queryNum: Int,
+                     config: Config): TpchTestResult = {
+    
+    val spark = SparkSession
+      .builder()
+      .appName("testSparkMeasure")
+      .getOrCreate()
+    var result = {
+      if (config.metrics == "stage") {
+        val stageMetrics = ch.cern.sparkmeasure.StageMetrics(spark)
+        stageMetrics.begin()
+        val result = runQuery(schemaProvider, queryNum, config)
+        stageMetrics.end()
+        val nameTempView = "PerfStageMetrics"
+        stageMetrics.createStageMetricsDF(nameTempView)
+        val aggregateDF = stageMetrics.aggregateStageMetrics(nameTempView)
+        val times = aggregateDF.select("executorRunTime", "executorCpuTime").take(1)(0)
+        result.utilization = times.getAs[Long](1) / times.getAs[Long](0)
+        result
+        //stageMetrics.printReport()
+        //stageMetrics.printAccumulables()
+        // save session metrics data
+        // val stageDF = stageMetrics.createStageMetricsDF("PerfStageMetrics")
+        // stageMetrics.saveData(stageDF.orderBy("jobId", "stageId"), "/build/tpch-results/stagemetrics_test1")
+        // val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
+        // stageMetrics.saveData(aggregatedDF, "/build/tpch-results/stagemetrics_report_test2")
+      } else if (config.metrics == "task") {
+        val taskMetrics = ch.cern.sparkmeasure.TaskMetrics(spark, true)
+        taskMetrics.begin()
+        val result = runQuery(schemaProvider, queryNum, config)
+        taskMetrics.end()
+        val nameTempView = "PerfTaskMetrics"
+        taskMetrics.createTaskMetricsDF(nameTempView)
+        val aggregateDF = taskMetrics.aggregateTaskMetrics(nameTempView)
+        val times = aggregateDF.select("executorRunTime", "executorCpuTime").take(1)(0)
+        result.utilization = (times.getAs[Long](1).asInstanceOf[Double] / times.getAs[Long](0)) * 100
+        result
+        // taskMetrics.printReport()
+        // taskMetrics.printAccumulables()
+        // val taskDf = taskMetrics.createTaskMetricsDF("PerfTaskMetrics")
+        // taskMetrics.saveData(taskDf.orderBy("jobId", "stageId", "index"), "/build/tpch-results/taskmetrics_test3")
+      } else {
+        runQuery(schemaProvider, queryNum, config)
+      }
+    }
+    result
+  }
 
   /** Validates and processes args related to the type of test.
    *  One major piece we acomplish is determining the fileType,
@@ -191,7 +230,7 @@ object TpchQuery {
    */
   def processTestMode(config: Config): Boolean = {
     config.datasource match {
-      case "ndp" if (config.protocol == "s3" &&
+      case "ndp" if (config.protocol.contains("s3") &&
                      config.format == "csv") => config.fileType = CSVS3
       case "spark" if (config.protocol == "file" &&
                      config.format == "csv") => config.fileType = CSVFile
@@ -280,6 +319,18 @@ object TpchQuery {
                                                    config.pushUDF,
                                                    config.explain)
     }
+  }
+  /** Handle the options as they relate to other params.
+   *  @param config The configuration to process.
+   */
+  private def processOptions(config: Config): Boolean = {
+    config.options match {
+      // With minio we do not support multiple partitions.
+      case "minio" => config.partitions = 1
+      config.hostName = "minioserver:9000"
+      case _ =>
+    }
+    true
   }
   private val usageInfo = """The program has two main modes, one where we are using
   *) --mode init or --mode initJdbc or --mode jdbc.  In this case
@@ -372,6 +423,10 @@ object TpchQuery {
               case "ndphdfs" => success
               case protocol => failure(s"ERROR: protocol: ${protocol} not suported")
             }),
+        opt[String]('m', "metrics")
+          .action((x, c) => c.copy(metrics = x))
+          .valueName("<stage or task>")
+          .text("Generate metrics for stage or task"),
         opt[Unit]("filePart")
           .action((x, c) => c.copy(filePart = true))
           .text("Use file based partitioning."),
@@ -416,6 +471,7 @@ object TpchQuery {
         checkConfig(
           c => {
             var status: Boolean = processTestMode(c)
+            status &= processOptions(c)
             status &= processTestNumbers(c)
             processPushdownOptions(c)
             if (!status) {
@@ -440,11 +496,6 @@ object TpchQuery {
     }
   }
 
-  case class TpchTestResult (
-    test: Integer,
-    seconds: Double,
-    bytesTransferred: Double)
-
   /** Shows the results from a ListBuffer[TpchTestResult]
    *
    * @param results - The test results.
@@ -453,12 +504,12 @@ object TpchQuery {
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
     val formatter = java.text.NumberFormat.getIntegerInstance
     println("Test Results")
-    println("Test    Time (sec)             Bytes")
-    println("------------------------------------")
+    println("Test    Time (sec)             Bytes      Utilization")
+    println("-----------------------------------------------------")
     for (r <- results) {
       val bytes = formatter.format(r.bytesTransferred)
-      println(f"${r.test}%4d, ${r.seconds}%10.3f," +
-              f" ${r.bytesTransferred}%20.0f")
+      println(f"${r.test}%4s, ${r.seconds}%10.3f," +
+              f" ${r.bytesTransferred}%20.0f," + f" ${r.utilization}%10.2f")
     }
   }
   private val hdfsServer = "dikehdfs"
@@ -501,9 +552,9 @@ object TpchQuery {
         case ds if (ds == "ndp" && config.format == "csv" &&
                     config.filePart) => "s3a://tpch-test-csv-part"
         case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "s3") => "s3a://tpch-test"
+                    config.protocol.contains("s3")) => "s3a://tpch-test"
         case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "s3") => "s3a://tpch-test-csv"
+                    config.protocol.contains("s3")) => "s3a://tpch-test-csv"
 
         case x if config.mode == "jdbc" => "file://tpch-data/tpch-test-jdbc"
       }
@@ -542,46 +593,15 @@ object TpchQuery {
     } else {
      S3StoreCSV.resetTransferLength
     }
-    if (config.options == "minio") {
-      TpchTableReaderS3.enableOptions("minio")
-    }
     println(s"InputPath: ${inputPath(config)}")
-
+    config.inputDir = inputPath(config)
     val schemaProvider = new TpchSchemaProvider(sparkContext,
-                                                TpchReaderParams(inputPath(config),
-                                                config.pushdownOptions, config.fileType,
-                                                config.partitions, config.filePart))
+                                                TpchReaderParams(config))
     for (r <- 0 to config.repeat) {
       for (i <- config.testList) {
         val output = new ListBuffer[(String, Float)]
-        println("Starting Q" + i)
         setDebugFile(config, i.toString)
-        val start = System.currentTimeMillis()
-        output ++= executeQueries(schemaProvider, i, config)
-        val end = System.currentTimeMillis()
-        val ms = (end - start)
-        if (r != 0) totalMs += ms
-        val seconds = ms / 1000.0
-        val statsType = FileType.getStatsType(config.fileType)
-        if (statsType.contains("hdfs")) {
-          results += TpchTestResult(i, seconds, TpchTableReaderHdfs.getStats(statsType).getBytesRead)
-        } else if (statsType == "file") {
-          results += TpchTestResult(i, seconds, TpchSchemaProvider.transferBytes)
-        } else if (statsType == "s3") {
-          results += TpchTestResult(i, seconds, S3StoreCSV.getTransferLength)
-        } else {
-          results += TpchTestResult(i, seconds, 0)
-        }
-        S3StoreCSV.resetTransferLength
-        println("Query Time " + seconds)
-        val outFile = new File("/tmp/TIMES" + i + ".txt")
-        val bw = new BufferedWriter(new FileWriter(outFile, true))
-
-        output.foreach {
-          case (key, value) => bw.write(f"${key}%s\t${value}%1.8f\n")
-        }
-
-        bw.close()
+        results += executeQueries(schemaProvider, i, config)
         showResults(results)
       }
     }
@@ -616,10 +636,9 @@ object TpchQuery {
     val csvPath = "tpch-test-csv/"
 
     val outputPath = getOutputPath(config)
+    config.inputDir = initTblPath
     val schemaProvider = new TpchSchemaProvider(sparkContext,
-                                                TpchReaderParams(initTblPath,
-                                                config.pushdownOptions, config.fileType,
-                                                config.partitions, config.filePart))
+                                                TpchReaderParams(config))
     for ((name, df) <- schemaProvider.dfMap) {
       val outputFilePath = outputPath + csvPath + name + ".csv"
       df.repartition(1)
@@ -644,10 +663,8 @@ object TpchQuery {
   def initCsvPart(config: Config): Unit = {
     val csvPartPath = "tpch-test-csv-part/"
     val outputPath = getOutputPath(config)
-    val schemaProvider = new TpchSchemaProvider(sparkContext,
-                                                TpchReaderParams(initTblPath,
-                                                config.pushdownOptions, config.fileType,
-                                                config.partitions, config.filePart))
+    config.inputDir = initTblPath
+    val schemaProvider = new TpchSchemaProvider(sparkContext, TpchReaderParams(config))
     for ((name, df) <- schemaProvider.dfMap) {
       val inputFs = FileSystem.get(sparkContext.hadoopConfiguration)
       val fs = FileSystem.get(URI.create(outputPath), sparkContext.hadoopConfiguration)
@@ -676,10 +693,9 @@ object TpchQuery {
    */
   def initJdbc(config: Config): Unit = {
     val h2Database = "file:///tpch-data/tpch-jdbc/tpch-h2-database"
+    config.inputDir = initTblPath
     val schemaProvider = new TpchSchemaProvider(sparkContext,
-                                                TpchReaderParams(initTblPath,
-                                                config.pushdownOptions, config.fileType,
-                                                config.partitions, config.filePart))
+                                                TpchReaderParams(config))
     TpchJdbc.setupDatabase()
     for ((name, df) <- schemaProvider.dfMap) {
         TpchJdbc.writeDf(df, name, h2Database)

@@ -72,6 +72,7 @@ object TpchTableReaderHdfs {
       sparkSession.read
         .format("com.github.datasource")
         .option("format", (if (FileType.isTblToDs(params.fileType)) "tbl" else "csv"))
+        .option("header", (if (FileType.isTbl(params.fileType)) "false" else "true"))
         .schema(schema)
         .option((if (FileType.isDisableProcessor(params.fileType)) "Disable" else "Enable") + "Processor", "")
         .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
