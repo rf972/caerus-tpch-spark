@@ -229,6 +229,9 @@ object TpchQuery {
    *  @return Boolean - true if valid, false if invalid config.
    */
   def processTestMode(config: Config): Boolean = {
+    if (config.mode == "initCsv") {
+      config.format = "tbl" // we are converting tbl to csv
+    }
     config.datasource match {
       case "ndp" if (config.protocol.contains("s3") &&
                      config.format == "csv") => config.fileType = CSVS3

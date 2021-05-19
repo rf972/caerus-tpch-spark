@@ -30,7 +30,7 @@ case class Config(
     checkResults: Boolean = false,
     var fileType: FileType = CSVS3,
     mode: String = "",  // The mode of the test.
-    format: String = "csv",
+    var format: String = "csv",
     datasource: String = "spark",
     protocol: String = "file",
     var hostName: String = "dikehdfs:9858",
