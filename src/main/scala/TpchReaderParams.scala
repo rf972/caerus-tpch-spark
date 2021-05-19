@@ -10,13 +10,14 @@ case class TpchReaderParams(inputDir: String,
                             partitions: Int,
                             filePart: Boolean,
                             hostName: String,
-                            options: String)
+                            options: String,
+                            config: Config)
 
 object TpchReaderParams {
     def apply(config: Config): TpchReaderParams = {
         new TpchReaderParams(config.inputDir,
                              config.pushdownOptions, config.fileType,
                              config.partitions, config.filePart,
-                             config.hostName, config.options)
+                             config.hostName, config.options, config)
     }
 }

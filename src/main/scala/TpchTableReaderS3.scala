@@ -44,6 +44,10 @@ object TpchTableReaderS3 {
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     val spark = sparkSession(params.hostName)
+    // Allow better progress tracking when we are with normal verbosity or higher.
+    if (params.config.verbose || params.config.normal) {
+      spark.conf.set("spark.datasource.pushdown.EnableProgress", "")
+    }
     enableOptions(params.options, spark)
     if (params.pushOpt.isPushdownEnabled()) {
       val df = spark.read
