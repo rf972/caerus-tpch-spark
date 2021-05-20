@@ -1,0 +1,23 @@
+package org.tpch.tablereader
+
+import org.tpch.config.Config
+import org.tpch.filetype._
+import org.tpch.pushdown.options.TpchPushdownOptions
+
+case class TpchReaderParams(inputDir: String,
+                            pushOpt: TpchPushdownOptions,
+                            fileType: FileType,
+                            partitions: Int,
+                            filePart: Boolean,
+                            hostName: String,
+                            options: String,
+                            config: Config)
+
+object TpchReaderParams {
+    def apply(config: Config): TpchReaderParams = {
+        new TpchReaderParams(config.inputDir,
+                             config.pushdownOptions, config.fileType,
+                             config.partitions, config.filePart,
+                             config.hostName, config.options, config)
+    }
+}

@@ -7,6 +7,7 @@ package org.tpch.pushdown.options
 case class TpchPushdownOptions(enableFilter: Boolean,
                                enableProject: Boolean,
                                enableAggregate: Boolean,
+                               enableUDF: Boolean,
                                explain: Boolean) {
 
     def isPushdownEnabled() : Boolean = {
