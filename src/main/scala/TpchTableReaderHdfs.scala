@@ -12,7 +12,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
-
+import org.tpch.tablereader._
 import org.tpch.filetype._
 import org.tpch.pushdown.options.TpchPushdownOptions
 
@@ -58,27 +58,28 @@ object TpchTableReaderHdfs {
     resetStats()
   }
   def readTable[T: WeakTypeTag]
-               (name: String, inputDir: String,
-                pushOpt: TpchPushdownOptions, partitions: Int, fileType: FileType)
+               (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     
-    if (!FileType.isDataSource(fileType)) {
+    if (!FileType.isDataSource(params.fileType)) {
       sparkSession.read
         .format("csv")
         .schema(schema)
-        .load(inputDir + "/" +  name + (if (FileType.isTbl(fileType)) ".tbl" else ".csv"))
+        .load(params.inputDir + "/" + name +
+              (if (FileType.isTbl(params.fileType)) ".tbl" else ".csv"))
     } else {
       sparkSession.read
         .format("com.github.datasource")
-        .option("format", (if (FileType.isTblToDs(fileType)) "tbl" else "csv"))
+        .option("format", (if (FileType.isTblToDs(params.fileType)) "tbl" else "csv"))
+        .option("header", (if (FileType.isTbl(params.fileType)) "false" else "true"))
         .schema(schema)
-        .option((if (FileType.isDisableProcessor(fileType)) "Disable" else "Enable") + "Processor", "")
-        .option((if (pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
-        .option((if (pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
-        .option((if (pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
-        .option("partitions", partitions)
-        .load(inputDir + "/" +  name + (if (FileType.isTbl(fileType)) ".tbl" else ".csv"))
+        .option((if (FileType.isDisableProcessor(params.fileType)) "Disable" else "Enable") + "Processor", "")
+        .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
+        .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
+        .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
+        .option("partitions", params.partitions)
+        .load(params.inputDir + "/" + name + (if (FileType.isTbl(params.fileType)) ".tbl" else ".csv"))
     }
   }
 }
