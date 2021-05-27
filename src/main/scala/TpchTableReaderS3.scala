@@ -18,7 +18,7 @@ object TpchTableReaderS3 {
       .master("local[2]")
       .appName("TpchProvider")
       .config("spark.datasource.pushdown.endpoint", s"""http://$hostName""")
-      .config("spark.datasource.pushdown.accessKey", "admin")
+      .config("spark.datasource.pushdown.accessKey", System.getProperty("user.name"))
       .config("spark.datasource.pushdown.secretKey", "admin123")
       .getOrCreate()
       
