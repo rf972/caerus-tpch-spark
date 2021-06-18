@@ -31,6 +31,7 @@ case class Config(
     var fileType: FileType = CSVS3,
     mode: String = "",  // The mode of the test.
     var format: String = "csv",
+    var outputFormat: String = "csv",
     datasource: String = "spark",
     protocol: String = "file",
     var hostName: String = "dikehdfs:9858",

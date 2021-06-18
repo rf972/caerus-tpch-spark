@@ -7,12 +7,15 @@ case object CSVFile extends FileType
 case object TBLFile extends FileType
 case object CSVHdfs extends FileType
 case object TBLHdfs extends FileType
+case object ParquetHdfs extends FileType
 case object CSVWebHdfs extends FileType
 case object TBLWebHdfs extends FileType
 case object CSVHdfsDs extends FileType
 case object TBLHdfsDs extends FileType
+case object ParquetHdfsDs extends FileType
 case object CSVDikeHdfs extends FileType
 case object TBLDikeHdfs extends FileType
+case object ParquetDikeHdfs extends FileType
 case object CSVDikeHdfsNoProc extends FileType
 case object TBLDikeHdfsNoProc extends FileType
 case object CSVWebHdfsDs extends FileType
@@ -89,7 +92,9 @@ object FileType {
     if (fileType == CSVHdfs
       || fileType == TBLHdfs
       || fileType == CSVHdfsDs
-      || fileType == TBLHdfsDs) {
+      || fileType == TBLHdfsDs
+      || fileType == ParquetHdfs
+      || fileType == ParquetHdfsDs) {
       "hdfs"
     } else if (fileType == CSVWebHdfs
       || fileType == TBLWebHdfs
@@ -98,6 +103,7 @@ object FileType {
       "webhdfs"
     } else if (fileType == CSVDikeHdfs
       || fileType == TBLDikeHdfs
+      || fileType == ParquetDikeHdfs
       || fileType == CSVDikeHdfsNoProc
       || fileType == TBLDikeHdfsNoProc) {
       "ndphdfs"
@@ -128,7 +134,10 @@ object FileType {
       || fileType == CSVWebHdfs
       || fileType == CSVHdfsDs
       || fileType == CSVDikeHdfs
-      || fileType == CSVDikeHdfsNoProc) {
+      || fileType == CSVDikeHdfsNoProc
+      || fileType == ParquetHdfs
+      || fileType == ParquetHdfsDs
+      || fileType == ParquetDikeHdfs) {
       true
     } else {
       false
@@ -145,7 +154,8 @@ object FileType {
       || fileType == CSVS3 || fileType == TBLS3
       || fileType == CSVFile || fileType == TBLFile
       || fileType == CSVHdfs || fileType == TBLHdfs
-      || fileType == CSVWebHdfs || fileType == TBLWebHdfs) {
+      || fileType == CSVWebHdfs || fileType == TBLWebHdfs
+      || fileType == ParquetHdfs) {
       false
     } else {
       true

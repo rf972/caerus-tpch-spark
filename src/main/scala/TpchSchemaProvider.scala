@@ -126,7 +126,10 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
              || params.fileType == TBLHdfsDs || params.fileType == CSVHdfsDs
              || params.fileType == TBLWebHdfsDs || params.fileType == CSVWebHdfsDs
              || params.fileType == TBLDikeHdfs || params.fileType == CSVDikeHdfs
-             || params.fileType == TBLDikeHdfsNoProc || params.fileType == CSVDikeHdfsNoProc)
+             || params.fileType == TBLDikeHdfsNoProc || params.fileType == CSVDikeHdfsNoProc
+             || params.fileType == ParquetHdfs || params.fileType == ParquetHdfsDs
+             || params.fileType == ParquetDikeHdfs
+             )
       Map(
           "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", params),
           "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", params),

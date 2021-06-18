@@ -61,13 +61,23 @@ object TpchTableReaderHdfs {
                (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    
+
     if (!FileType.isDataSource(params.fileType)) {
       sparkSession.read
-        .format("csv")
+        .format(params.config.format)
         .schema(schema)
-        .load(params.inputDir + "/" + name +
-              (if (FileType.isTbl(params.fileType)) ".tbl" else ".csv"))
+        .load(params.inputDir + "/" + name + "." + params.config.format)
+    } else if (params.config.format == "parquet") {
+      sparkSession.read
+        .format("com.github.datasource")
+        .option("format", "parquet")
+        .option("outputFormat", params.config.outputFormat)
+        .schema(schema)
+        .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
+        .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
+        .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
+        .option("partitions", params.partitions)
+        .load(params.inputDir + "/" + name + ".parquet")
     } else {
       sparkSession.read
         .format("com.github.datasource")
