@@ -6,7 +6,6 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import scala.reflect.runtime.universe._
-import org.tpch.filetype._
 import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.jdbc.TpchJdbc
 import main.scala.TpchSchemaProvider
@@ -55,7 +54,7 @@ object TpchTableReaderS3 {
         .option("format", "csv")
         .option("partitions", params.partitions)
         .schema(schema)
-        .load(params.inputDir + "/" +  name + "/")
+        .load(params.inputDir + "/" +  name + s".${params.config.format}" + "/")
         df
     } else {
       val df = spark.read
@@ -66,7 +65,7 @@ object TpchTableReaderS3 {
         .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .schema(schema)
-        .load(params.inputDir + "/" + name + "/")
+        .load(params.inputDir + "/" + name + s".${params.config.format}" + "/")
         df
     }
   }

@@ -13,7 +13,6 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import org.tpch.tablereader._
-import org.tpch.filetype._
 import org.tpch.pushdown.options.TpchPushdownOptions
 
 /** Represents a tableReader, which can read in a dataframe
@@ -47,9 +46,9 @@ object TpchTableReaderHdfs {
       println(f.getPath().getName())
     }
   }
-  def init(fileType: FileType) : Unit = {
+  def init(params: TpchReaderParams) : Unit = {
     val hadoopConfig: Configuration = sparkSession.sparkContext.hadoopConfiguration
-    if (fileType == CSVHdfs) {
+    if (params.config.format == "csv") {
       // Force use of V2 data source.
       println("Using V2 Spark CSV Data Source.")
       sparkSession.conf.set("spark.sql.sources.useV1SourceList", "")
@@ -62,7 +61,7 @@ object TpchTableReaderHdfs {
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
 
-    if (!FileType.isDataSource(params.fileType)) {
+    if (params.config.datasource != "ndp") {
       sparkSession.read
         .format(params.config.format)
         .schema(schema)
@@ -77,19 +76,19 @@ object TpchTableReaderHdfs {
         .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .option("partitions", params.partitions)
-        .load(params.inputDir + "/" + name + ".parquet")
+        .load(params.inputDir + "/" + name + params.config.format)
     } else {
       sparkSession.read
         .format("com.github.datasource")
-        .option("format", (if (FileType.isTblToDs(params.fileType)) "tbl" else "csv"))
-        .option("header", (if (FileType.isTbl(params.fileType)) "false" else "true"))
+        .option("format", params.config.format)
+        .option("outputFormat", params.config.outputFormat)
+        .option("header", (if (params.config.format == "tbl") "false" else "true"))
         .schema(schema)
-        .option((if (FileType.isDisableProcessor(params.fileType)) "Disable" else "Enable") + "Processor", "")
         .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
         .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .option("partitions", params.partitions)
-        .load(params.inputDir + "/" + name + (if (FileType.isTbl(params.fileType)) ".tbl" else ".csv"))
+        .load(params.inputDir + "/" + name + "." + params.config.format)
     }
   }
 }
