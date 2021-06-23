@@ -21,8 +21,6 @@ import org.tpch.pushdown.options.TpchPushdownOptions
 object TpchTableReaderHdfs {
   
   private val sparkSession = SparkSession.builder
-      .master("local[2]")
-      .appName("TpchProvider")
       .getOrCreate()
 
   def getStats(name: String): org.apache.hadoop.fs.FileSystem.Statistics = {
@@ -71,12 +69,11 @@ object TpchTableReaderHdfs {
         .format("com.github.datasource")
         .option("format", "parquet")
         .option("outputFormat", params.config.outputFormat)
-        .schema(schema)
         .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
         .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .option("partitions", params.partitions)
-        .load(params.inputDir + "/" + name + params.config.format)
+        .load(params.inputDir + "/" + name + "." + params.config.format)
     } else {
       sparkSession.read
         .format("com.github.datasource")

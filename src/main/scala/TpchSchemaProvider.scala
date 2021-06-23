@@ -111,7 +111,8 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
           "part" -> TpchJdbc.readTable[Part]("part", params),
           "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", params),
           "supplier" -> TpchJdbc.readTable[Supplier]("supplier", params) )
-    else if (params.config.protocol.contains("hdfs"))
+    else if (params.config.protocol.contains("hdfs") && 
+             !params.config.format.contains("tbl"))
       Map(
           "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", params),
           "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", params),
@@ -147,7 +148,6 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
   }
   val pushUDF = params.pushOpt.enableUDF
   val spark = SparkSession.builder
-      .appName("TpchProvider")
       .getOrCreate()
 }
 

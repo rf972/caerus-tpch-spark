@@ -181,7 +181,6 @@ object TpchQuery {
     
     val spark = SparkSession
       .builder()
-      .appName("testSparkMeasure")
       .getOrCreate()
     var result = {
       if (config.metrics == "stage") {
@@ -693,7 +692,7 @@ object TpchQuery {
     config.inputDir = initTblPath
     val schemaProvider = new TpchSchemaProvider(sparkContext,
                                                 TpchReaderParams(config))
-    sparkContext.hadoopConfiguration.setInt("parquet.block.size", 32 * 1024 * 1024)
+    // sparkContext.hadoopConfiguration.setInt("parquet.block.size", 32 * 1024 * 1024)
     for ((name, df) <- schemaProvider.dfMap) {
       val outputFilePath = outputPath + parquetPath + name + ".parquet"
       df.repartition(1)
