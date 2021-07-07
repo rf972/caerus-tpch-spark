@@ -36,6 +36,7 @@ object TpchTableReaderFile {
       sparkSession.read
         .format("csv")
         .schema(schema)
+        .option("header", (if (params.config.format == "tbl") "false" else "true"))
         .load(params.inputDir + "/" +  name + ".csv")
     } else {
       /* This will create a data frame out of a list of Row objects. 
