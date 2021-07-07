@@ -60,11 +60,13 @@ object TpchTableReaderHdfs {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
 
     if (params.config.datasource != "ndp") {
+      /* Use Spark datasource. */
       sparkSession.read
         .format(params.config.format)
         .schema(schema)
         .load(params.inputDir + "/" + name + "." + params.config.format)
     } else if (params.config.format == "parquet") {
+      /* Parquet does not use a schema, it gets the schema from the file. */
       sparkSession.read
         .format("com.github.datasource")
         .option("format", "parquet")
@@ -75,6 +77,7 @@ object TpchTableReaderHdfs {
         .option("partitions", params.partitions)
         .load(params.inputDir + "/" + name + "." + params.config.format)
     } else {
+      /* CSV and tbl support from ndp data source. */
       sparkSession.read
         .format("com.github.datasource")
         .option("format", params.config.format)
