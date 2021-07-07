@@ -13,9 +13,14 @@ import scala.reflect.runtime.universe._
 import com.github.datasource.s3.S3StoreCSV
 import com.github.datasource.parse._
 
-import org.apache.parquet.hadoop.util.HadoopInputFile
-import org.apache.parquet.hadoop.ParquetFileReader
+import org.apache.hadoop.conf.Configuration
 import org.apache.parquet.HadoopReadOptions
+import org.apache.parquet.ParquetReadOptions
+import org.apache.parquet.hadoop.ParquetFileReader
+import org.apache.parquet.hadoop.ParquetRecordReader
+import org.apache.parquet.hadoop.metadata.FileMetaData
+import org.apache.parquet.hadoop.util.HadoopInputFile
+import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.fs._
 import org.tpch.config.Config
@@ -487,6 +492,10 @@ object TpchQuery {
           .action((x, c) => c.copy(repeat = x.toInt))
           .valueName("<repeat count>")
           .text("Number of times to repeat test"),
+        opt[String]("fileInfo")
+          .abbr("fi")
+          .action((x, c) => c.copy(fileInfo = x))
+          .text("show info on this file (parquet)"),
         help("help").text("prints this usage text"),
         checkConfig(
           c => {
@@ -497,7 +506,7 @@ object TpchQuery {
             if (!status) {
               failure("Validation failed.")
             } else {
-              if ((c.mode == "") && (c.testNumbers == "")) {
+              if ((c.mode == "") && (c.testNumbers == "") && (c.fileInfo == "")) {
                 failure("must select either --mode or --test")
               } else {
                 success
@@ -758,6 +767,31 @@ object TpchQuery {
     println("Finished converting *.tbl to jdbc:h2 format")
   }
 
+  /** Show information about this file.
+   *
+   * @param config - The configuration of the test.
+   * @return Unit
+   */
+  def fileInfo(config: Config): Unit = {
+    
+    var configuration = new Configuration
+
+    var options: ParquetReadOptions = HadoopReadOptions
+      .builder(configuration)
+      .build();
+    val reader = new ParquetFileReader(HadoopInputFile.fromPath(new org.apache.hadoop.fs.Path(config.fileInfo),
+                                                                         configuration), options)
+    println(reader.getFileMetaData().toString)
+    val parquetBlocks = reader.getFooter.getBlocks
+    // Generate one partition per row Group.
+    for (i <- 0 to parquetBlocks.size - 1) {
+      val parquetBlock = parquetBlocks.get(i)
+      println(s"Row Group ${i}")
+      println(s"  Row Count ${parquetBlock.getRowCount()}")
+      println(s"  Bytes ${parquetBlock.getTotalByteSize()}")
+      println(s"  Compressed Bytes ${parquetBlock.getCompressedSize()}")
+    }
+  }
   /** This is the main entry point of the program,
    *  see above parseArgs for more usage information.
    *
@@ -796,6 +830,7 @@ object TpchQuery {
       }
       case "initParquet" => initParquet(config)
       case "initJdbc" => initJdbc(config)
+      case _ if (config.fileInfo != "") => fileInfo(config)
       case _ => benchmark(config)
     }
   }

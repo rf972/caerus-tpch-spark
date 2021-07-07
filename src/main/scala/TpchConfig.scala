@@ -35,6 +35,7 @@ case class Config(
     var hostName: String = "dikehdfs:9858",
     var inputDir: String = "",
     filePart: Boolean = false,
+    fileInfo: String = "",
     var pushdownOptions: TpchPushdownOptions =
         new TpchPushdownOptions(false, false, false, false, false),
     pushdown: Boolean = false,
