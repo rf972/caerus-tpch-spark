@@ -40,7 +40,17 @@ import org.apache.spark.sql.types._
 case class TpchTestResult(test: String,
                           seconds: Double,
                           bytesTransferred: Double,
-                          var utilization: Double = 0)
+                          status: Boolean = true,
+                          var utilization: Double = 0) {
+  override def toString(): String =  {
+    val formatter = java.text.NumberFormat.getIntegerInstance
+    val bytes = formatter.format(bytesTransferred)
+    (f"${test}%4s, ${seconds}%10.3f," +
+     f" ${bytesTransferred}%20.0f," +
+     f" ${utilization}%10.2f" +
+     f" ${if (status) { "OK"} else { "FAILED" }}%12s")
+  }
+}
 
 object TpchTestResult {
   def empty: Unit = new TpchTestResult("", 0, 0)
@@ -148,32 +158,43 @@ object TpchQuery {
     outputDir
   }
   def runQuery(schemaProvider: TpchSchemaProvider, 
-                     queryNum: Int,
-                     config: Config): TpchTestResult = {
+               queryNum: Int,
+               config: Config): TpchTestResult = {
     
     val outputDir: String = getOutputDir(config)
     val query = Class.forName(f"main.scala.Q${queryNum}%02d")   
                      .newInstance.asInstanceOf[TpchQuery]
     val df = query.execute(sparkContext, schemaProvider)
     val t0 = System.nanoTime()
+    var status = true
     if (config.explain) {
       df.explain(true)
       //println("Num Partitions: " + df.rdd.partitions.length)
     }
     println("Starting " + query.getName())
-    outputDF(df, outputDir, query.getName(), config)
+    try {
+      outputDF(df, outputDir, query.getName(), config)
+    } catch {
+      case _: Throwable => println("Exception occurred running outputDF")
+        status = false
+    }
     var t1 = System.nanoTime()
     val seconds = (t1 - t0) / 1000000000.0f // second
     val statsType = config.protocol
     val result = {
       if (statsType.contains("hdfs")) {
-        TpchTestResult(query.getName(), seconds, TpchTableReaderHdfs.getStats(statsType).getBytesRead)
+        TpchTestResult(query.getName(), seconds,
+                       TpchTableReaderHdfs.getStats(statsType).getBytesRead,
+                       status)
       } else if (statsType == "file") {
-        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes)
+        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes,
+                       status)
       } else if (statsType == "s3") {
-        TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength)
+        TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength,
+                       status)
       } else {
-        TpchTestResult(query.getName(), seconds, 0)
+        TpchTestResult(query.getName(), seconds, 0,
+                       status)
       }
     }
     S3StoreCSV.resetTransferLength
@@ -531,14 +552,11 @@ object TpchQuery {
    * @return Unit
    */
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
-    val formatter = java.text.NumberFormat.getIntegerInstance
     println("Test Results")
-    println("Test    Time (sec)             Bytes      Utilization")
-    println("-----------------------------------------------------")
+    println("Test    Time (sec)             Bytes      Utilization    Status")
+    println("---------------------------------------------------------------")
     for (r <- results) {
-      val bytes = formatter.format(r.bytesTransferred)
-      println(f"${r.test}%4s, ${r.seconds}%10.3f," +
-              f" ${r.bytesTransferred}%20.0f," + f" ${r.utilization}%10.2f")
+      println(r)
     }
   }
   private val hdfsServer = "dikehdfs"
