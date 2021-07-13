@@ -175,8 +175,9 @@ object TpchQuery {
     try {
       outputDF(df, outputDir, query.getName(), config)
     } catch {
-      case _: Throwable => println("Exception occurred running outputDF")
-        status = false
+      case t : Throwable => println("Exception occurred running outputDF")
+      println(org.apache.commons.lang.exception.ExceptionUtils.getStackTrace(t))
+      status = false
     }
     var t1 = System.nanoTime()
     val seconds = (t1 - t0) / 1000000000.0f // second
