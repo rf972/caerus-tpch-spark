@@ -46,9 +46,9 @@ object TpchTableReaderHdfs {
   }
   def init(params: TpchReaderParams) : Unit = {
     val hadoopConfig: Configuration = sparkSession.sparkContext.hadoopConfiguration
-    if (params.config.format == "csv") {
+    if (params.config.format == "csv" || params.config.format == "parquet") {
       // Force use of V2 data source.
-      println("Using V2 Spark CSV Data Source.")
+      println("Using V2 Spark Data Source.")
       sparkSession.conf.set("spark.sql.sources.useV1SourceList", "")
       //sparkSession.conf.set("spark.sql.files.maxPartitionBytes", "1000000000000")
     }

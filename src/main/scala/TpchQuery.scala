@@ -47,7 +47,7 @@ case class TpchTestResult(test: String,
     val bytes = formatter.format(bytesTransferred)
     (f"${test}%4s, ${seconds}%10.3f," +
      f" ${bytesTransferred}%20.0f," +
-     f" ${utilization}%10.2f" +
+     f" ${utilization}%10.2f," +
      f" ${if (status) { "OK"} else { "FAILED" }}%12s")
   }
 }
@@ -84,7 +84,7 @@ object TpchQuery {
 
   private val sparkConf = new SparkConf().setAppName("Simple Application")
   private val sparkContext = new SparkContext(sparkConf)
-    
+
   /** Writes the dataframe to disk.
    *
    *  @param df - the dataframe to output
@@ -98,16 +98,16 @@ object TpchQuery {
 
     if (outputDir == null || outputDir == "")
       df.collect().foreach(println)
-    else {      
+    else {
       val castColumns = (df.schema.fields map { x =>
         if (x.dataType == DoubleType) {
           format_number(bround(col(x.name), 3), 2)
         } else {
           col(x.name)
-        }      
+        }
       }).toArray
 
-      if (!className.contains("17") && config.checkResults) {       
+      if (!className.contains("17") && config.checkResults) {
         df.sort((df.columns.toSeq map { x => col(x) }).toArray:_*)
             .select(castColumns:_*)
             .repartition(1)
@@ -133,7 +133,7 @@ object TpchQuery {
    *  @param config - The configuration of the tst.
    *  @return String - Path to output results.
    */
-  def getOutputDir(config: Config): String = { 
+  def getOutputDir(config: Config): String = {
     var outputDir = "file:///build/tpch-results/latest/" + config.mode.toString
     outputDir += s"${config.datasource}-${config.protocol}-${config.format}"
     if (config.partitions != 0) {
@@ -157,12 +157,12 @@ object TpchQuery {
     outputDir += "-W" + config.workers
     outputDir
   }
-  def runQuery(schemaProvider: TpchSchemaProvider, 
+  def runQuery(schemaProvider: TpchSchemaProvider,
                queryNum: Int,
                config: Config): TpchTestResult = {
-    
+
     val outputDir: String = getOutputDir(config)
-    val query = Class.forName(f"main.scala.Q${queryNum}%02d")   
+    val query = Class.forName(f"main.scala.Q${queryNum}%02d")
                      .newInstance.asInstanceOf[TpchQuery]
     val df = query.execute(sparkContext, schemaProvider)
     val t0 = System.nanoTime()
@@ -202,10 +202,10 @@ object TpchQuery {
     println("Query Time " + seconds)
     result
   }
-  def executeQueries(schemaProvider: TpchSchemaProvider, 
+  def executeQueries(schemaProvider: TpchSchemaProvider,
                      queryNum: Int,
                      config: Config): TpchTestResult = {
-    
+
     val spark = SparkSession
       .builder()
       .getOrCreate()
@@ -250,7 +250,7 @@ object TpchQuery {
     result
   }
   /** Validates and processes args related to the type of test.
-   *  
+   *
    *  @param config - The program config to be validated.
    *  @return Boolean - true if valid, false if invalid config.
    */
@@ -291,7 +291,7 @@ object TpchQuery {
                      config.format == "tbl") => true
       case "spark" if (config.protocol == "webhdfs" &&
                      config.format == "tbl") => true
-      case "ndp" if (config.protocol == "s3" && config.format == "tbl" && 
+      case "ndp" if (config.protocol == "s3" && config.format == "tbl" &&
                      config.filePart == true) => true
       case "ndp" if (config.protocol == "s3" && config.format == "tbl") => true
       case ds if config.protocol == "jdbc" => true
@@ -334,7 +334,7 @@ object TpchQuery {
       }
     }
     true
-  }  
+  }
   /** Parse the pushdown related arguments and generate
    *  the config.pushdownOptions.
    *
@@ -373,19 +373,19 @@ object TpchQuery {
      convert the database to .csv or to a JDBC format.
   *) otherwise the program will be running the tpch benchmark
      and the parameters below determine the test to run, and
-     with which configuration to use such as: 
+     with which configuration to use such as:
      --format (csv | tbl | parquet)
      --protocol (file | s3 | hdfs | webhdfs | ndphdfs | jdbc)
      --datasource (spark | ndp)
      -t (test number)"""
   /** Parses all the test arguments and forms the
    *  config object, which is used to convey the test parameters.
-   *  
+   *
    *  @param args - The test arguments from the user.
    *  @return Config - The object representing all program params.
    */
   def parseArgs(args: Array[String]): Config = {
-  
+
     val builder = OParser.builder[Config]
     val parser1 = {
       import builder._
@@ -443,6 +443,7 @@ object TpchQuery {
             f match {
               case "csv"  => success
               case "parquet"  => success
+              case "binary"  => success
               case format => failure(s"ERROR: format: ${format} not suported")
             }),
         opt[String]("datasource")
@@ -537,7 +538,7 @@ object TpchQuery {
     }
     // OParser.parse returns Option[Config]
     val config = OParser.parse(parser1, args, Config())
-    
+
     config match {
         case Some(config) => config
         case _ =>
@@ -582,7 +583,7 @@ object TpchQuery {
                     config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
                     config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test-csv/"
-                    
+
         case ds if (ds == "spark" && config.format == "tbl" &&
                     config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test/"
         case ds if (ds == "spark" && config.format == "csv" &&
@@ -641,7 +642,7 @@ object TpchQuery {
     var totalMs: Long = 0
     var results = new ListBuffer[TpchTestResult]
     val outputDir: String = getOutputDir(config)
-   
+
     if (config.protocol.contains("hdfs")) {
       TpchTableReaderHdfs.init(TpchReaderParams(config))
     } else {
@@ -754,7 +755,7 @@ object TpchQuery {
 
       val inputPath = new Path(initTblPartPath + s"/${name}.tbl.*")
       val status = inputFs.globStatus(inputPath)
-      val partitions = if (status.length == 0) 1 else status.length 
+      val partitions = if (status.length == 0) 1 else status.length
       println(s"input: ${initTblPartPath}/${name}.tbl partitions: ${partitions}")
       df.repartition(partitions)
         .write
@@ -792,7 +793,7 @@ object TpchQuery {
    * @return Unit
    */
   def fileInfo(config: Config): Unit = {
-    
+
     var configuration = new Configuration
 
     var options: ParquetReadOptions = HadoopReadOptions
