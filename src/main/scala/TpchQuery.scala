@@ -328,7 +328,7 @@ object TpchQuery {
       }
     }
     for (t <- config.testList) {
-      if (t < 1 || t > 22) {
+      if (t < 1 || t > 122) {
         println(s"test numbers must be 1..22.  ${t} is not a valid test")
         return false
       }
