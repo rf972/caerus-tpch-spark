@@ -12,7 +12,6 @@ import com.github.datasource.s3.S3StoreCSV
 import com.github.datasource.parse._
 import org.apache.hadoop.fs._
 import org.tpch.config
-import org.tpch.filetype._
 import org.tpch.jdbc.TpchJdbc
 import org.tpch.pushdown.options.TpchPushdownOptions
 
@@ -28,14 +27,15 @@ case class Config(
     options: String = "",
     workers: Int = 1,
     checkResults: Boolean = false,
-    var fileType: FileType = CSVS3,
     mode: String = "",  // The mode of the test.
     var format: String = "csv",
+    var outputFormat: String = "csv",
     datasource: String = "spark",
     protocol: String = "file",
     var hostName: String = "dikehdfs:9858",
     var inputDir: String = "",
     filePart: Boolean = false,
+    fileInfo: String = "",
     var pushdownOptions: TpchPushdownOptions =
         new TpchPushdownOptions(false, false, false, false, false),
     pushdown: Boolean = false,

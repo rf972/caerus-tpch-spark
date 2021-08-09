@@ -12,9 +12,18 @@ import scala.reflect.runtime.universe._
 
 import com.github.datasource.s3.S3StoreCSV
 import com.github.datasource.parse._
+
+import org.apache.hadoop.conf.Configuration
+import org.apache.parquet.HadoopReadOptions
+import org.apache.parquet.ParquetReadOptions
+import org.apache.parquet.hadoop.ParquetFileReader
+import org.apache.parquet.hadoop.ParquetRecordReader
+import org.apache.parquet.hadoop.metadata.FileMetaData
+import org.apache.parquet.hadoop.util.HadoopInputFile
+import org.apache.parquet.hadoop.util.HadoopInputFile
+import org.apache.hadoop.fs.Path
 import org.apache.hadoop.fs._
 import org.tpch.config.Config
-import org.tpch.filetype._
 import org.tpch.jdbc.TpchJdbc
 import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.tablereader._
@@ -31,7 +40,17 @@ import org.apache.spark.sql.types._
 case class TpchTestResult(test: String,
                           seconds: Double,
                           bytesTransferred: Double,
-                          var utilization: Double = 0)
+                          status: Boolean = true,
+                          var utilization: Double = 0) {
+  override def toString(): String =  {
+    val formatter = java.text.NumberFormat.getIntegerInstance
+    val bytes = formatter.format(bytesTransferred)
+    (f"${test}%4s, ${seconds}%10.3f," +
+     f" ${bytesTransferred}%20.0f," +
+     f" ${utilization}%10.2f," +
+     f" ${if (status) { "OK"} else { "FAILED" }}%12s")
+  }
+}
 
 object TpchTestResult {
   def empty: Unit = new TpchTestResult("", 0, 0)
@@ -65,7 +84,7 @@ object TpchQuery {
 
   private val sparkConf = new SparkConf().setAppName("Simple Application")
   private val sparkContext = new SparkContext(sparkConf)
-    
+
   /** Writes the dataframe to disk.
    *
    *  @param df - the dataframe to output
@@ -79,16 +98,16 @@ object TpchQuery {
 
     if (outputDir == null || outputDir == "")
       df.collect().foreach(println)
-    else {      
+    else {
       val castColumns = (df.schema.fields map { x =>
         if (x.dataType == DoubleType) {
           format_number(bround(col(x.name), 3), 2)
         } else {
           col(x.name)
-        }      
+        }
       }).toArray
 
-      if (!className.contains("17") && config.checkResults) {       
+      if (!className.contains("17") && config.checkResults) {
         df.sort((df.columns.toSeq map { x => col(x) }).toArray:_*)
             .select(castColumns:_*)
             .repartition(1)
@@ -114,7 +133,7 @@ object TpchQuery {
    *  @param config - The configuration of the tst.
    *  @return String - Path to output results.
    */
-  def getOutputDir(config: Config): String = { 
+  def getOutputDir(config: Config): String = {
     var outputDir = "file:///build/tpch-results/latest/" + config.mode.toString
     outputDir += s"${config.datasource}-${config.protocol}-${config.format}"
     if (config.partitions != 0) {
@@ -138,46 +157,57 @@ object TpchQuery {
     outputDir += "-W" + config.workers
     outputDir
   }
-  def runQuery(schemaProvider: TpchSchemaProvider, 
-                     queryNum: Int,
-                     config: Config): TpchTestResult = {
-    
+  def runQuery(schemaProvider: TpchSchemaProvider,
+               queryNum: Int,
+               config: Config): TpchTestResult = {
+
     val outputDir: String = getOutputDir(config)
-    val query = Class.forName(f"main.scala.Q${queryNum}%02d")   
+    val query = Class.forName(f"main.scala.Q${queryNum}%02d")
                      .newInstance.asInstanceOf[TpchQuery]
     val df = query.execute(sparkContext, schemaProvider)
     val t0 = System.nanoTime()
+    var status = true
     if (config.explain) {
       df.explain(true)
       //println("Num Partitions: " + df.rdd.partitions.length)
     }
     println("Starting " + query.getName())
-    outputDF(df, outputDir, query.getName(), config)
+    try {
+      outputDF(df, outputDir, query.getName(), config)
+    } catch {
+      case t : Throwable => println("Exception occurred running outputDF")
+      println(org.apache.commons.lang.exception.ExceptionUtils.getStackTrace(t))
+      status = false
+    }
     var t1 = System.nanoTime()
     val seconds = (t1 - t0) / 1000000000.0f // second
-    val statsType = FileType.getStatsType(config.fileType)
+    val statsType = config.protocol
     val result = {
       if (statsType.contains("hdfs")) {
-        TpchTestResult(query.getName(), seconds, TpchTableReaderHdfs.getStats(statsType).getBytesRead)
+        TpchTestResult(query.getName(), seconds,
+                       TpchTableReaderHdfs.getStats(statsType).getBytesRead,
+                       status)
       } else if (statsType == "file") {
-        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes)
+        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes,
+                       status)
       } else if (statsType == "s3") {
-        TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength)
+        TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength,
+                       status)
       } else {
-        TpchTestResult(query.getName(), seconds, 0)
+        TpchTestResult(query.getName(), seconds, 0,
+                       status)
       }
     }
     S3StoreCSV.resetTransferLength
     println("Query Time " + seconds)
     result
   }
-  def executeQueries(schemaProvider: TpchSchemaProvider, 
+  def executeQueries(schemaProvider: TpchSchemaProvider,
                      queryNum: Int,
                      config: Config): TpchTestResult = {
-    
+
     val spark = SparkSession
       .builder()
-      .appName("testSparkMeasure")
       .getOrCreate()
     var result = {
       if (config.metrics == "stage") {
@@ -219,59 +249,61 @@ object TpchQuery {
     }
     result
   }
-
   /** Validates and processes args related to the type of test.
-   *  One major piece we acomplish is determining the fileType,
-   *  which is a description of the type of test to perform,
-   *  which is used by the rest of the test.
-   *  
+   *
    *  @param config - The program config to be validated.
    *  @return Boolean - true if valid, false if invalid config.
    */
   def processTestMode(config: Config): Boolean = {
-    if (config.mode == "initCsv") {
+    if (config.mode == "initCsv" || config.mode == "initParquet") {
       config.format = "tbl" // we are converting tbl to csv
     }
     config.datasource match {
       case "ndp" if (config.protocol.contains("s3") &&
-                     config.format == "csv") => config.fileType = CSVS3
+                     config.format == "csv") => true
       case "spark" if (config.protocol == "file" &&
-                     config.format == "csv") => config.fileType = CSVFile
+                     config.format == "csv") => true
       case "spark" if (config.protocol == "file" &&
-                     config.format == "tbl") => config.fileType = TBLFile
+                     config.format == "tbl") => true
       case "spark" if (config.protocol == "hdfs" &&
-                     config.format == "csv") => config.fileType = CSVHdfs
+                     config.format == "csv") => true
       case "spark" if (config.protocol == "hdfs" &&
-                     config.format == "tbl") => config.fileType = TBLHdfs
+                     config.format == "tbl") => true
+      case "spark" if (config.protocol == "hdfs" &&
+                       config.format == "parquet") => true
       case "ndp" if (config.protocol == "hdfs" &&
-                     config.format == "csv") => config.fileType = CSVHdfsDs
+                     config.format == "csv") => true
       case "ndp" if (config.protocol == "hdfs" &&
-                     config.format == "tbl")  => config.fileType = TBLHdfsDs
+                     config.format == "tbl")  => true
+      case "ndp" if (config.protocol == "hdfs" &&
+                     config.format == "parquet") => true
       case "ndp" if (config.protocol == "webhdfs" &&
-                     config.format == "csv") => config.fileType = CSVWebHdfsDs
+                     config.format == "csv") => true
       case "ndp" if (config.protocol == "webhdfs" &&
-                     config.format == "tbl") => config.fileType = TBLWebHdfsDs
+                     config.format == "tbl") => true
       case "ndp" if (config.protocol == "ndphdfs" &&
-                     config.format == "csv") => config.fileType = CSVDikeHdfs
+                     config.format == "csv") => true
       case "ndp" if (config.protocol == "ndphdfs" &&
-                     config.format == "tbl") => config.fileType = TBLDikeHdfs
+                     config.format == "tbl") => true
+      case "ndp" if (config.protocol == "ndphdfs" &&
+                     config.format == "parquet") => true
       case "spark" if (config.protocol == "webhdfs" &&
-                     config.format == "tbl") => config.fileType = TBLWebHdfs
+                     config.format == "tbl") => true
       case "spark" if (config.protocol == "webhdfs" &&
-                     config.format == "tbl") => config.fileType = CSVWebHdfs
-      case "ndp" if (config.protocol == "s3" && config.format == "tbl" && 
-                     config.filePart == true) => config.fileType = TBLS3
-      case "ndp" if (config.protocol == "s3" && config.format == "tbl") => config.fileType = TBLS3
-      case ds if config.mode == "jdbc" => config.fileType = JDBC
-      case ds if config.mode == "initCsv" || config.mode == "initJdbc" => {
-        config.fileType = TBLFile
+                     config.format == "tbl") => true
+      case "ndp" if (config.protocol == "s3" && config.format == "tbl" &&
+                     config.filePart == true) => true
+      case "ndp" if (config.protocol == "s3" && config.format == "tbl") => true
+      case ds if config.protocol == "jdbc" => true
+      case ds if config.mode == "initCsv" || config.mode == "initParquet" ||
+                 config.mode == "initJdbc" => {
+        true
       }
       case test => println(s"Unsupported test configuration: test: ${test} " +
                            s"format: ${config.format} protocol: ${config.protocol}" +
                            s" datasource: ${config.datasource}")
-                   return false
+                   false
     }
-    return true
   }
   /** Parse the test numbers argument and generate a list of integers
    *  with the test numbers to run.
@@ -296,13 +328,13 @@ object TpchQuery {
       }
     }
     for (t <- config.testList) {
-      if (t < 1 || t > 22) {
+      if (t < 1 || t > 122) {
         println(s"test numbers must be 1..22.  ${t} is not a valid test")
         return false
       }
     }
     true
-  }  
+  }
   /** Parse the pushdown related arguments and generate
    *  the config.pushdownOptions.
    *
@@ -336,24 +368,24 @@ object TpchQuery {
     true
   }
   private val usageInfo = """The program has two main modes, one where we are using
-  *) --mode init or --mode initJdbc or --mode jdbc.  In this case
+  *) --mode init or --mode initJdbc.  In this case
      the test is initializing a database for example to
      convert the database to .csv or to a JDBC format.
   *) otherwise the program will be running the tpch benchmark
      and the parameters below determine the test to run, and
-     with which configuration to use such as: 
-     --format (csv | tbl)
-     --protocol (file | s3 | hdfs | webhdfs | ndphdfs)
+     with which configuration to use such as:
+     --format (csv | tbl | parquet)
+     --protocol (file | s3 | hdfs | webhdfs | ndphdfs | jdbc)
      --datasource (spark | ndp)
      -t (test number)"""
   /** Parses all the test arguments and forms the
    *  config object, which is used to convey the test parameters.
-   *  
+   *
    *  @param args - The test arguments from the user.
    *  @return Config - The object representing all program params.
    */
   def parseArgs(args: Array[String]): Config = {
-  
+
     val builder = OParser.builder[Config]
     val parser1 = {
       import builder._
@@ -385,12 +417,12 @@ object TpchQuery {
         opt[String]("mode")
           .action((x, c) => c.copy(mode = x))
           .valueName("<test mode>")
-          .text("test mode (jdbc, init, initJdbc)")
+          .text("test mode (initCsv, initParquet, initJdbc)")
           .validate( mode =>
             mode match {
-              case "jdbc" => success
               case "initCsv" => success
-              case _ => failure("mode must be jdbc, initCsv")
+              case "initParquet" => success
+              case _ => failure("mode must be initCsv, initParquet")
             }),
         opt[String]('f', "format")
           .action((x, c) => c.copy(format = x))
@@ -400,6 +432,18 @@ object TpchQuery {
             f match {
               case "tbl" => success
               case "csv"  => success
+              case "parquet"  => success
+              case format => failure(s"ERROR: format: ${format} not suported")
+            }),
+        opt[String]("outputFormat")
+          .action((x, c) => c.copy(outputFormat = x))
+          .valueName("<outputformat>")
+          .text("format for ndp to return (csv, parquet)")
+          .validate(f =>
+            f match {
+              case "csv"  => success
+              case "parquet"  => success
+              case "binary"  => success
               case format => failure(s"ERROR: format: ${format} not suported")
             }),
         opt[String]("datasource")
@@ -416,10 +460,11 @@ object TpchQuery {
         opt[String]('r', "protocol")
           .action((x, c) => c.copy(protocol = x))
           .valueName("<protocol>")
-          .text("server protocol to use (file, s3, hdfs, webhdfs, ndphdfs)")
+          .text("server protocol to use (file, s3, hdfs, webhdfs, ndphdfs, jdbc)")
           .validate(protocol =>
             protocol match {
               case "file" => success
+              case "jdbc" => success
               case "s3" => success
               case "hdfs" => success
               case "webhdfs" => success
@@ -470,6 +515,10 @@ object TpchQuery {
           .action((x, c) => c.copy(repeat = x.toInt))
           .valueName("<repeat count>")
           .text("Number of times to repeat test"),
+        opt[String]("fileInfo")
+          .abbr("fi")
+          .action((x, c) => c.copy(fileInfo = x))
+          .text("show info on this file (parquet)"),
         help("help").text("prints this usage text"),
         checkConfig(
           c => {
@@ -480,7 +529,7 @@ object TpchQuery {
             if (!status) {
               failure("Validation failed.")
             } else {
-              if ((c.mode == "") && (c.testNumbers == "")) {
+              if ((c.mode == "") && (c.testNumbers == "") && (c.fileInfo == "")) {
                 failure("must select either --mode or --test")
               } else {
                 success
@@ -489,7 +538,7 @@ object TpchQuery {
     }
     // OParser.parse returns Option[Config]
     val config = OParser.parse(parser1, args, Config())
-    
+
     config match {
         case Some(config) => config
         case _ =>
@@ -505,14 +554,11 @@ object TpchQuery {
    * @return Unit
    */
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
-    val formatter = java.text.NumberFormat.getIntegerInstance
     println("Test Results")
-    println("Test    Time (sec)             Bytes      Utilization")
-    println("-----------------------------------------------------")
+    println("Test    Time (sec)             Bytes      Utilization    Status")
+    println("---------------------------------------------------------------")
     for (r <- results) {
-      val bytes = formatter.format(r.bytesTransferred)
-      println(f"${r.test}%4s, ${r.seconds}%10.3f," +
-              f" ${r.bytesTransferred}%20.0f," + f" ${r.utilization}%10.2f")
+      println(r)
     }
   }
   private val hdfsServer = "dikehdfs"
@@ -531,11 +577,13 @@ object TpchQuery {
                     config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
                     config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test-csv/"
+        case ds if (ds == "ndp" && config.format == "parquet" &&
+                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test-parquet/"
         case ds if (ds == "ndp" && config.format == "tbl" &&
                     config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
                     config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test-csv/"
-                    
+
         case ds if (ds == "spark" && config.format == "tbl" &&
                     config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test/"
         case ds if (ds == "spark" && config.format == "csv" &&
@@ -544,11 +592,15 @@ object TpchQuery {
                     config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}:9870/tpch-test/"
         case ds if (ds == "spark" && config.format == "csv" &&
                     config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}:9870/tpch-test-csv/"
+        case ds if (ds == "spark" && config.format == "parquet" &&
+                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test-parquet/"
 
         case ds if (ds == "ndp" && config.format == "tbl" &&
                     config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
                     config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test-csv/"
+        case ds if (ds == "ndp" && config.format == "parquet" &&
+                    config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test-parquet/"
 
         case ds if (ds == "ndp" && config.format == "tbl" &&
                     config.filePart) => "s3a://tpch-test-part"
@@ -559,7 +611,7 @@ object TpchQuery {
         case ds if (ds == "ndp" && config.format == "csv" &&
                     config.protocol.contains("s3")) => "s3a://tpch-test-csv"
 
-        case x if config.mode == "jdbc" => "file://tpch-data/tpch-test-jdbc"
+        case x if config.protocol == "jdbc" => "file://tpch-data/tpch-test-jdbc"
       }
   }
 
@@ -577,7 +629,7 @@ object TpchQuery {
         directory.mkdir()
         println("creating data dir")
       }
-      RowIterator.setDebugFile(outputDir + config.fileType.toString + "-" + test)
+      RowIterator.setDebugFile(outputDir + config.format + "-" + test)
     }
   }
 
@@ -590,9 +642,9 @@ object TpchQuery {
     var totalMs: Long = 0
     var results = new ListBuffer[TpchTestResult]
     val outputDir: String = getOutputDir(config)
-   
-    if (FileType.isHdfs(config.fileType)) {
-      TpchTableReaderHdfs.init(config.fileType)
+
+    if (config.protocol.contains("hdfs")) {
+      TpchTableReaderHdfs.init(TpchReaderParams(config))
     } else {
      S3StoreCSV.resetTransferLength
     }
@@ -657,6 +709,34 @@ object TpchQuery {
     }
     println("Finished converting *.tbl to *.csv")
   }
+  /** Initializes a new database using parquet.
+   *
+   * @param config - test configuration.
+   * @return Unit
+   */
+  def initParquet(config: Config): Unit = {
+    val parquetPath = "tpch-test-parquet/"
+
+    val outputPath = getOutputPath(config)
+    config.inputDir = initTblPath
+    val schemaProvider = new TpchSchemaProvider(sparkContext,
+                                                TpchReaderParams(config))
+    // sparkContext.hadoopConfiguration.setInt("parquet.block.size", 32 * 1024 * 1024)
+    for ((name, df) <- schemaProvider.dfMap) {
+      val outputFilePath = outputPath + parquetPath + name + ".parquet"
+      df.repartition(1)
+        .write
+        .option("header", true)
+        .option("partitions", "1")
+        .format("parquet")
+        .save(outputFilePath)
+
+      val fs = FileSystem.get(URI.create(outputPath), sparkContext.hadoopConfiguration)
+      fs.delete(new Path(outputFilePath + "/_SUCCESS"), true)
+      println("Finished writing " + name + ".parquet")
+    }
+    println("Finished converting *.tbl to *.parquet")
+  }
 
   /** Initializes a new database with partitions using csv.
    *
@@ -675,7 +755,7 @@ object TpchQuery {
 
       val inputPath = new Path(initTblPartPath + s"/${name}.tbl.*")
       val status = inputFs.globStatus(inputPath)
-      val partitions = if (status.length == 0) 1 else status.length 
+      val partitions = if (status.length == 0) 1 else status.length
       println(s"input: ${initTblPartPath}/${name}.tbl partitions: ${partitions}")
       df.repartition(partitions)
         .write
@@ -707,6 +787,31 @@ object TpchQuery {
     println("Finished converting *.tbl to jdbc:h2 format")
   }
 
+  /** Show information about this file.
+   *
+   * @param config - The configuration of the test.
+   * @return Unit
+   */
+  def fileInfo(config: Config): Unit = {
+
+    var configuration = new Configuration
+
+    var options: ParquetReadOptions = HadoopReadOptions
+      .builder(configuration)
+      .build();
+    val reader = new ParquetFileReader(HadoopInputFile.fromPath(new org.apache.hadoop.fs.Path(config.fileInfo),
+                                                                         configuration), options)
+    println(reader.getFileMetaData().toString)
+    val parquetBlocks = reader.getFooter.getBlocks
+    // Generate one partition per row Group.
+    for (i <- 0 to parquetBlocks.size - 1) {
+      val parquetBlock = parquetBlocks.get(i)
+      println(s"Row Group ${i}")
+      println(s"  Row Count ${parquetBlock.getRowCount()}")
+      println(s"  Bytes ${parquetBlock.getTotalByteSize()}")
+      println(s"  Compressed Bytes ${parquetBlock.getCompressedSize()}")
+    }
+  }
   /** This is the main entry point of the program,
    *  see above parseArgs for more usage information.
    *
@@ -718,10 +823,13 @@ object TpchQuery {
     val config = parseArgs(args)
     println("args: " + args.mkString(" "))
     println("pushdown: " + config.pushdown)
+    println("datasource: " + config.datasource)
+    println("protocol: " + config.protocol)
+    println("format: " + config.format)
+    println("output format: " + config.outputFormat)
     println("pushdown options: " + config.pushdownOptions)
     println("workers: " + config.workers)
     println("mode: " + config.mode)
-    println("fileType: " + config.fileType)
     println("start: " + config.start)
     println("end: " + config.end)
 
@@ -740,7 +848,9 @@ object TpchQuery {
           initCsv(config)
         }
       }
+      case "initParquet" => initParquet(config)
       case "initJdbc" => initJdbc(config)
+      case _ if (config.fileInfo != "") => fileInfo(config)
       case _ => benchmark(config)
     }
   }

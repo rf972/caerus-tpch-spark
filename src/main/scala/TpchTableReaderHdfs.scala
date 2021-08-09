@@ -13,7 +13,6 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import org.tpch.tablereader._
-import org.tpch.filetype._
 import org.tpch.pushdown.options.TpchPushdownOptions
 
 /** Represents a tableReader, which can read in a dataframe
@@ -22,8 +21,6 @@ import org.tpch.pushdown.options.TpchPushdownOptions
 object TpchTableReaderHdfs {
   
   private val sparkSession = SparkSession.builder
-      .master("local[2]")
-      .appName("TpchProvider")
       .getOrCreate()
 
   def getStats(name: String): org.apache.hadoop.fs.FileSystem.Statistics = {
@@ -47,11 +44,11 @@ object TpchTableReaderHdfs {
       println(f.getPath().getName())
     }
   }
-  def init(fileType: FileType) : Unit = {
+  def init(params: TpchReaderParams) : Unit = {
     val hadoopConfig: Configuration = sparkSession.sparkContext.hadoopConfiguration
-    if (fileType == CSVHdfs) {
+    if (params.config.format == "csv" || params.config.format == "parquet") {
       // Force use of V2 data source.
-      println("Using V2 Spark CSV Data Source.")
+      println("Using V2 Spark Data Source.")
       sparkSession.conf.set("spark.sql.sources.useV1SourceList", "")
       //sparkSession.conf.set("spark.sql.files.maxPartitionBytes", "1000000000000")
     }
@@ -61,25 +58,37 @@ object TpchTableReaderHdfs {
                (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    
-    if (!FileType.isDataSource(params.fileType)) {
+
+    if (params.config.datasource != "ndp") {
+      /* Use Spark datasource. */
       sparkSession.read
-        .format("csv")
+        .format(params.config.format)
         .schema(schema)
-        .load(params.inputDir + "/" + name +
-              (if (FileType.isTbl(params.fileType)) ".tbl" else ".csv"))
-    } else {
+        .load(params.inputDir + "/" + name + "." + params.config.format)
+    } else if (params.config.format == "parquet") {
+      /* Parquet does not use a schema, it gets the schema from the file. */
       sparkSession.read
         .format("com.github.datasource")
-        .option("format", (if (FileType.isTblToDs(params.fileType)) "tbl" else "csv"))
-        .option("header", (if (FileType.isTbl(params.fileType)) "false" else "true"))
-        .schema(schema)
-        .option((if (FileType.isDisableProcessor(params.fileType)) "Disable" else "Enable") + "Processor", "")
+        .option("format", "parquet")
+        .option("outputFormat", params.config.outputFormat)
         .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
         .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
         .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
         .option("partitions", params.partitions)
-        .load(params.inputDir + "/" + name + (if (FileType.isTbl(params.fileType)) ".tbl" else ".csv"))
+        .load(params.inputDir + "/" + name + "." + params.config.format)
+    } else {
+      /* CSV and tbl support from ndp data source. */
+      sparkSession.read
+        .format("com.github.datasource")
+        .option("format", params.config.format)
+        .option("outputFormat", params.config.outputFormat)
+        .option("header", (if (params.config.format == "tbl") "false" else "true"))
+        .schema(schema)
+        .option((if (params.pushOpt.enableFilter) "Enable" else "Disable") + "FilterPush", "")
+        .option((if (params.pushOpt.enableProject) "Enable" else "Disable") + "ProjectPush", "")
+        .option((if (params.pushOpt.enableAggregate) "Enable" else "Disable") + "AggregatePush", "")
+        .option("partitions", params.partitions)
+        .load(params.inputDir + "/" + name + "." + params.config.format)
     }
   }
 }

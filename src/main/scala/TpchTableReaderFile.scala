@@ -6,7 +6,6 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import scala.reflect.runtime.universe._
-import org.tpch.filetype._
 import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.jdbc.TpchJdbc
 import main.scala.TpchSchemaProvider
@@ -33,10 +32,11 @@ object TpchTableReaderFile {
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
     
-    if (params.fileType == CSVFile) {
+    if (params.config.format == "csv") {
       sparkSession.read
         .format("csv")
         .schema(schema)
+        .option("header", (if (params.config.format == "tbl") "false" else "true"))
         .load(params.inputDir + "/" +  name + ".csv")
     } else {
       /* This will create a data frame out of a list of Row objects. 

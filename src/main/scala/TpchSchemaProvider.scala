@@ -7,7 +7,6 @@ import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.{Dataset, Row}
 import org.tpch.tablereader._
 import org.tpch.jdbc.TpchJdbc
-import org.tpch.filetype._
 import org.tpch.tablereader.hdfs._
 import org.tpch.pushdown.options.TpchPushdownOptions
 
@@ -92,27 +91,17 @@ case class Supplier(
 
 class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
   val dfMap = 
-    if (params.fileType == CSVS3) 
+    if (params.config.protocol == "s3") 
       Map(
-          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.csv", params),
-          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.csv", params),
-          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.csv", params),
-          "region" -> TpchTableReaderS3.readTable[Region]("region.csv", params),
-          "orders" -> TpchTableReaderS3.readTable[Order]("orders.csv", params),
-          "part" -> TpchTableReaderS3.readTable[Part]("part.csv", params),
-          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.csv", params),
-          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.csv", params) )
-    else if (params.fileType == TBLS3)
-      Map(
-          "customer" -> TpchTableReaderS3.readTable[Customer]("customer.tbl", params),
-          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem.tbl", params),
-          "nation" -> TpchTableReaderS3.readTable[Nation]("nation.tbl", params),
-          "region" -> TpchTableReaderS3.readTable[Region]("region.tbl", params),
-          "orders" -> TpchTableReaderS3.readTable[Order]("orders.tbl", params),
-          "part" -> TpchTableReaderS3.readTable[Part]("part.tbl", params),
-          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp.tbl", params),
-          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier.tbl", params) )
-    else if (params.fileType == JDBC)
+          "customer" -> TpchTableReaderS3.readTable[Customer]("customer", params),
+          "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem", params),
+          "nation" -> TpchTableReaderS3.readTable[Nation]("nation", params),
+          "region" -> TpchTableReaderS3.readTable[Region]("region", params),
+          "orders" -> TpchTableReaderS3.readTable[Order]("orders", params),
+          "part" -> TpchTableReaderS3.readTable[Part]("part", params),
+          "partsupp" -> TpchTableReaderS3.readTable[Partsupp]("partsupp", params),
+          "supplier" -> TpchTableReaderS3.readTable[Supplier]("supplier", params) )
+    else if (params.config.protocol == "jdbc")
       Map(
           "customer" -> TpchJdbc.readTable[Customer]("customer", params),
           "lineitem" -> TpchJdbc.readTable[Lineitem]("lineitem", params),
@@ -122,11 +111,8 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
           "part" -> TpchJdbc.readTable[Part]("part", params),
           "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", params),
           "supplier" -> TpchJdbc.readTable[Supplier]("supplier", params) )
-    else if (params.fileType == CSVHdfs || params.fileType == CSVWebHdfs
-             || params.fileType == TBLHdfsDs || params.fileType == CSVHdfsDs
-             || params.fileType == TBLWebHdfsDs || params.fileType == CSVWebHdfsDs
-             || params.fileType == TBLDikeHdfs || params.fileType == CSVDikeHdfs
-             || params.fileType == TBLDikeHdfsNoProc || params.fileType == CSVDikeHdfsNoProc)
+    else if (params.config.protocol.contains("hdfs") && 
+             !params.config.format.contains("tbl"))
       Map(
           "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", params),
           "lineitem" -> TpchTableReaderHdfs.readTable[Lineitem]("lineitem", params),
@@ -162,7 +148,6 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
   }
   val pushUDF = params.pushOpt.enableUDF
   val spark = SparkSession.builder
-      .appName("TpchProvider")
       .getOrCreate()
 }
 
