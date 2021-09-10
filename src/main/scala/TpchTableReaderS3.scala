@@ -11,8 +11,8 @@ import org.tpch.jdbc.TpchJdbc
 import main.scala.TpchSchemaProvider
 import com.github.datasource.parse._
 
-object TpchTableReaderS3 {  
-  
+object TpchTableReaderS3 {
+
   private def sparkSession(hostName: String) = SparkSession.builder
       .master("local[2]")
       .appName("TpchProvider")
@@ -20,7 +20,7 @@ object TpchTableReaderS3 {
       .config("spark.datasource.pushdown.accessKey", System.getProperty("user.name"))
       .config("spark.datasource.pushdown.secretKey", "admin123")
       .getOrCreate()
-      
+
   def enableOptions(name: String, spark: SparkSession): Unit = {
     name match {
       case "minio" => {
@@ -28,7 +28,7 @@ object TpchTableReaderS3 {
         spark.conf.set("spark.datasource.pushdown.DisableGroupbyPush", "")
         spark.conf.set("spark.datasource.pushdown.DisableSupportsIsNull", "")
         spark.conf.set("spark.datasource.pushdown.DisabledCasts", "NUMERIC")
-        /* By default we split into N partitions of max size 
+        /* By default we split into N partitions of max size
          * conf.filesMaxPartitionBytes.
          * However, minio does not support ranges yet, so until it does
          * we can only use partitions == 1.
@@ -42,7 +42,7 @@ object TpchTableReaderS3 {
                (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    val spark = sparkSession(params.hostName)
+    val spark = sparkSession(params.config.s3HostName)
     // Allow better progress tracking when we are with normal verbosity or higher.
     if (params.config.verbose || params.config.normal) {
       spark.conf.set("spark.datasource.pushdown.EnableProgress", "")

@@ -15,7 +15,7 @@ import com.github.datasource.parse._
  * from a standard file using the spark datasource.
  */
 object TpchTableReaderFile {
-  
+
   private val sparkSession = SparkSession.builder
       .master("local[2]")
       .appName("TpchProvider")
@@ -31,15 +31,19 @@ object TpchTableReaderFile {
                (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    
+
     if (params.config.format == "csv") {
       sparkSession.read
-        .format("csv")
+        .format(params.config.format)
         .schema(schema)
         .option("header", (if (params.config.format == "tbl") "false" else "true"))
         .load(params.inputDir + "/" +  name + ".csv")
+    } else if (params.config.format == "parquet") {
+      sparkSession.read
+        .format(params.config.format)
+        .load(params.inputDir + "/" +  name + ".parquet")
     } else {
-      /* This will create a data frame out of a list of Row objects. 
+      /* This will create a data frame out of a list of Row objects.
        */
       sqlContext.createDataFrame(sparkContext.textFile(
         params.inputDir + "/" + name + ".tbl*").map(l => {
