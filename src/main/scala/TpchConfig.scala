@@ -8,7 +8,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.reflect.runtime.universe._
 
-import com.github.datasource.parse._
 import org.apache.hadoop.fs._
 import org.tpch.config
 import org.tpch.jdbc.TpchJdbc
@@ -53,4 +52,5 @@ case class Config(
     quiet: Boolean = false,
     normal: Boolean = false,
     metrics: String = "task",
+    bytesServer: String = "",
     kwargs: Map[String, String] = Map())

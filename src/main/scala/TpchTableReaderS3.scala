@@ -9,7 +9,6 @@ import scala.reflect.runtime.universe._
 import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.jdbc.TpchJdbc
 import main.scala.TpchSchemaProvider
-import com.github.datasource.parse._
 
 object TpchTableReaderS3 {
 

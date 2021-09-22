@@ -11,7 +11,6 @@ import scala.collection.mutable.ListBuffer
 import scala.reflect.runtime.universe._
 
 // import com.github.datasource.s3.S3StoreCSV
-import com.github.datasource.parse._
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.parquet.HadoopReadOptions
@@ -41,13 +40,13 @@ case class TpchTestResult(test: String,
                           seconds: Double,
                           bytesTransferred: Double,
                           status: Boolean = true,
-                          var utilization: Double = 0) {
+                          var cpuTime: Double = 0) {
   override def toString(): String =  {
     val formatter = java.text.NumberFormat.getIntegerInstance
     val bytes = formatter.format(bytesTransferred)
     (f"${test}%4s, ${seconds}%10.3f," +
      f" ${bytesTransferred}%20.0f," +
-     f" ${utilization}%10.2f," +
+     f" ${cpuTime}%10.2f," +
      f" ${if (status) { "OK"} else { "FAILED" }}%12s")
   }
 }
@@ -169,6 +168,7 @@ object TpchQuery {
                      .newInstance.asInstanceOf[TpchQuery]
     val df = query.execute(sparkContext, schemaProvider)
     val t0 = System.nanoTime()
+    val startBytes = getBytes(config)
     var status = true
     if (config.explain) {
       df.explain(true)
@@ -185,25 +185,64 @@ object TpchQuery {
     var t1 = System.nanoTime()
     val seconds = (t1 - t0) / 1000000000.0f // second
     val statsType = config.protocol
-    val result = {
-      if (statsType.contains("hdfs")) {
-        TpchTestResult(query.getName(), seconds,
-          TpchTableReaderHdfs.getBytesRead(statsType),
-                       status)
+    val bytes = {
+      if (config.bytesServer != "") {
+        calcBytes(config, startBytes)
+      } else if (statsType.contains("hdfs")) {
+        TpchTableReaderHdfs.getBytesRead(statsType)
       } else if (statsType == "file") {
-        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes,
-                       status)
+        TpchSchemaProvider.transferBytes
       } /* else if (statsType == "s3") {
         TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength,
                        status)
       } */ else {
-        TpchTestResult(query.getName(), seconds, 0,
-                       status)
+        0
       }
     }
+    val result = TpchTestResult(query.getName(), seconds, bytes,
+                                status)
     // S3StoreCSV.resetTransferLength
-    println("Query Time " + seconds)
+    println("Query Time " + seconds + " bytes " + bytes)
     result
+  }
+  def getBytes(config: Config) : Array[Long] = {
+    import scala.sys.process._
+    val bytes = new ListBuffer[Long]()
+    if (config.bytesServer != "") {
+      val server = config.bytesServer.split(",")(0)
+      val adapters = config.bytesServer.split(",")(1).split(":")
+      println("server: " + server + " adapters " + adapters.mkString(", "))
+      for (a <- adapters) {
+        val output = s"ssh ${server} sudo ifconfig ${a}".!!
+        val bytesOutput = {
+          var currentBytes = ""
+          for (l <- output.split("\n")) {
+            if (l.contains("TX packets")) {
+              currentBytes = l.split(" ").filter(_.nonEmpty)(4)
+            }
+          }
+          currentBytes
+        }
+        bytes += bytesOutput.toLong
+      }
+    }
+    bytes.toArray
+  }
+  def calcBytes(config: Config, startBytes : Array[Long]) : Long = {
+    import scala.sys.process._
+    var totalBytes: Long = 0
+    val bytes = new ListBuffer[Long]()
+    if (config.bytesServer != "") {
+      val server = config.bytesServer.split(",")(0)
+      val adapters = config.bytesServer.split(",")(1).split(":")
+      val endBytes = getBytes(config)
+      println(startBytes)
+      println(endBytes)
+      for (i <- 0 until endBytes.length) {
+        totalBytes += endBytes(i) - startBytes(i)
+      }
+    }
+    totalBytes
   }
   def executeQueries(schemaProvider: TpchSchemaProvider,
                      queryNum: Int,
@@ -222,15 +261,16 @@ object TpchQuery {
         stageMetrics.createStageMetricsDF(nameTempView)
         val aggregateDF = stageMetrics.aggregateStageMetrics(nameTempView)
         val times = aggregateDF.select("executorRunTime", "executorCpuTime").take(1)(0)
-        result.utilization = times.getAs[Long](1) / times.getAs[Long](0)
-        result
-        //stageMetrics.printReport()
-        //stageMetrics.printAccumulables()
+        result.cpuTime = times.getAs[Long](0)
+
+        /* stageMetrics.printReport()
+        stageMetrics.printAccumulables()
         // save session metrics data
-        // val stageDF = stageMetrics.createStageMetricsDF("PerfStageMetrics")
-        // stageMetrics.saveData(stageDF.orderBy("jobId", "stageId"), "/build/tpch-results/stagemetrics_test1")
-        // val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
-        // stageMetrics.saveData(aggregatedDF, "/build/tpch-results/stagemetrics_report_test2")
+        val stageDF = stageMetrics.createStageMetricsDF("PerfStageMetrics")
+        stageMetrics.saveData(stageDF.orderBy("jobId", "stageId"), "/build/tpch-results/stagemetrics_test1")
+        val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
+        stageMetrics.saveData(aggregatedDF, "/build/tpch-results/stagemetrics_report_test2") */
+        result
       } else if (config.metrics == "task") {
         val taskMetrics = ch.cern.sparkmeasure.TaskMetrics(spark, true)
         taskMetrics.begin()
@@ -240,12 +280,16 @@ object TpchQuery {
         taskMetrics.createTaskMetricsDF(nameTempView)
         val aggregateDF = taskMetrics.aggregateTaskMetrics(nameTempView)
         val times = aggregateDF.select("executorRunTime", "executorCpuTime").take(1)(0)
-        result.utilization = (times.getAs[Long](1).asInstanceOf[Double] / times.getAs[Long](0)) * 100
+        //println("executorRunTime " + times.getAs[Long](1).asInstanceOf[Double] +
+        //        "executorCPUTime " + times.getAs[Long](0))
+        // result.utilization = (times.getAs[Long](1).asInstanceOf[Double] / times.getAs[Long](0)) * 100
+        result.cpuTime = times.getAs[Long](0)
+        /* taskMetrics.printReport()
+        taskMetrics.printAccumulables()
+        val taskDf = taskMetrics.createTaskMetricsDF("PerfTaskMetrics")
+        taskMetrics.saveData(taskDf.orderBy("jobId", "stageId", "index"), "/build/tpch-results/taskmetrics_test3")
+        */
         result
-        // taskMetrics.printReport()
-        // taskMetrics.printAccumulables()
-        // val taskDf = taskMetrics.createTaskMetricsDF("PerfTaskMetrics")
-        // taskMetrics.saveData(taskDf.orderBy("jobId", "stageId", "index"), "/build/tpch-results/taskmetrics_test3")
       } else {
         runQuery(schemaProvider, queryNum, config)
       }
@@ -431,6 +475,10 @@ object TpchQuery {
           .action((x, c) => c.copy(compLevel = x))
           .valueName("<compression level>")
           .text("degree to which we compress(-200-20)"),
+        opt[String]("bytesServer")
+          .abbr("bs")
+          .action((x, c) => c.copy(bytesServer = x))
+          .text("get bytes xferred from server/adpater(s) (server,adapter1:adapter2)"),
         opt[String]("mode")
           .action((x, c) => c.copy(mode = x))
           .valueName("<test mode>")
@@ -575,7 +623,7 @@ object TpchQuery {
    */
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
     println("Test Results")
-    println("Test    Time (sec)             Bytes      Utilization    Status")
+    println("Test    Time (sec)             Bytes      CPU Time      Status")
     println("---------------------------------------------------------------")
     for (r <- results) {
       println(r)
@@ -650,7 +698,7 @@ object TpchQuery {
         directory.mkdir()
         println("creating data dir")
       }
-      RowIterator.setDebugFile(outputDir + config.format + "-" + test)
+      // RowIterator.setDebugFile(outputDir + config.format + "-" + test)
     }
   }
 
