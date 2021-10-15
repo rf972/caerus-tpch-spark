@@ -40,11 +40,12 @@ case class TpchTestResult(test: String,
                           seconds: Double,
                           bytesTransferred: Double,
                           status: Boolean = true,
-                          var cpuTime: Double = 0) {
+                          var cpuTime: Double = 0,
+                          cores: Integer = 0) {
   override def toString(): String =  {
     val formatter = java.text.NumberFormat.getIntegerInstance
     val bytes = formatter.format(bytesTransferred)
-    (f"${test}%4s, ${seconds}%10.3f," +
+    (f"${test}%4s,   ${cores}%2d, ${seconds}%10.3f," +
      f" ${bytesTransferred}%20.0f," +
      f" ${cpuTime}%10.2f," +
      f" ${if (status) { "OK"} else { "FAILED" }}%12s")
@@ -200,7 +201,7 @@ object TpchQuery {
       }
     }
     val result = TpchTestResult(query.getName(), seconds, bytes,
-                                status)
+                                status, cores=config.workers)
     // S3StoreCSV.resetTransferLength
     println("Query Time " + seconds + " bytes " + bytes)
     result
@@ -210,10 +211,14 @@ object TpchQuery {
     val bytes = new ListBuffer[Long]()
     if (config.bytesServer != "") {
       val server = config.bytesServer.split(",")(0)
+      var cmd = "ssh ${server} "
+      if (server == "local") {
+        cmd = ""
+      }
       val adapters = config.bytesServer.split(",")(1).split(":")
       println("server: " + server + " adapters " + adapters.mkString(", "))
       for (a <- adapters) {
-        val output = s"ssh ${server} sudo ifconfig ${a}".!!
+        val output = s"${cmd}sudo ifconfig ${a}".!!
         val bytesOutput = {
           var currentBytes = ""
           for (l <- output.split("\n")) {
@@ -623,8 +628,8 @@ object TpchQuery {
    */
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
     println("Test Results")
-    println("Test    Time (sec)             Bytes      CPU Time      Status")
-    println("---------------------------------------------------------------")
+    println("Test    Cores  Time (sec)             Bytes      CPU Time      Status")
+    println("---------------------------------------------------------------------")
     for (r <- results) {
       println(r)
     }
