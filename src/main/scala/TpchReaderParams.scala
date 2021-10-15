@@ -16,6 +16,6 @@ object TpchReaderParams {
         new TpchReaderParams(config.inputDir,
                              config.pushdownOptions,
                              config.partitions, config.filePart,
-                             config.hostName, config.options, config)
+                             config.s3HostName, config.options, config)
     }
 }

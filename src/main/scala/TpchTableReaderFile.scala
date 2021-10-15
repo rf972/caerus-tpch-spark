@@ -9,13 +9,12 @@ import scala.reflect.runtime.universe._
 import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.jdbc.TpchJdbc
 import main.scala.TpchSchemaProvider
-import com.github.datasource.parse._
 
 /** Represents a tableReader, which can read in a dataframe
  * from a standard file using the spark datasource.
  */
 object TpchTableReaderFile {
-  
+
   private val sparkSession = SparkSession.builder
       .master("local[2]")
       .appName("TpchProvider")
@@ -31,21 +30,25 @@ object TpchTableReaderFile {
                (name: String, params: TpchReaderParams)
                (implicit tag: TypeTag[T]): Dataset[Row] = {
     val schema = ScalaReflection.schemaFor[T].dataType.asInstanceOf[StructType]
-    
+
     if (params.config.format == "csv") {
       sparkSession.read
-        .format("csv")
+        .format(params.config.format)
         .schema(schema)
         .option("header", (if (params.config.format == "tbl") "false" else "true"))
         .load(params.inputDir + "/" +  name + ".csv")
-    } else {
-      /* This will create a data frame out of a list of Row objects. 
+    } else { // if (params.config.format == "parquet") {
+      sparkSession.read
+        .format(params.config.format)
+        .load(params.inputDir + "/" +  name + ".parquet")
+    } /*else {
+      /* This will create a data frame out of a list of Row objects.
        */
       sqlContext.createDataFrame(sparkContext.textFile(
         params.inputDir + "/" + name + ".tbl*").map(l => {
           TpchSchemaProvider.transferBytes += l.size
           RowIterator.parseLine(l, schema, '|')
           }), StructType(schema))
-    }
+    } */
   }
 }

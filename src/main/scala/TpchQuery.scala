@@ -10,8 +10,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.reflect.runtime.universe._
 
-import com.github.datasource.s3.S3StoreCSV
-import com.github.datasource.parse._
+// import com.github.datasource.s3.S3StoreCSV
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.parquet.HadoopReadOptions
@@ -41,13 +40,14 @@ case class TpchTestResult(test: String,
                           seconds: Double,
                           bytesTransferred: Double,
                           status: Boolean = true,
-                          var utilization: Double = 0) {
+                          var cpuTime: Double = 0,
+                          cores: Integer = 0) {
   override def toString(): String =  {
     val formatter = java.text.NumberFormat.getIntegerInstance
     val bytes = formatter.format(bytesTransferred)
-    (f"${test}%4s, ${seconds}%10.3f," +
+    (f"${test}%4s,   ${cores}%2d, ${seconds}%10.3f," +
      f" ${bytesTransferred}%20.0f," +
-     f" ${utilization}%10.2f," +
+     f" ${cpuTime}%10.2f," +
      f" ${if (status) { "OK"} else { "FAILED" }}%12s")
   }
 }
@@ -145,6 +145,9 @@ object TpchQuery {
     if (config.options != "") {
       outputDir += s"-${config.options}"
     }
+    if (config.pushRule) {
+      outputDir += "-Rule"
+    }
     if (config.pushFilter && config.pushProject) {
       outputDir += "-PushdownFilterProject"
     } else if (config.pushdown) {
@@ -166,6 +169,7 @@ object TpchQuery {
                      .newInstance.asInstanceOf[TpchQuery]
     val df = query.execute(sparkContext, schemaProvider)
     val t0 = System.nanoTime()
+    val startBytes = getBytes(config)
     var status = true
     if (config.explain) {
       df.explain(true)
@@ -182,25 +186,68 @@ object TpchQuery {
     var t1 = System.nanoTime()
     val seconds = (t1 - t0) / 1000000000.0f // second
     val statsType = config.protocol
-    val result = {
-      if (statsType.contains("hdfs")) {
-        TpchTestResult(query.getName(), seconds,
-                       TpchTableReaderHdfs.getStats(statsType).getBytesRead,
-                       status)
+    val bytes = {
+      if (config.bytesServer != "") {
+        calcBytes(config, startBytes)
+      } else if (statsType.contains("hdfs")) {
+        TpchTableReaderHdfs.getBytesRead(statsType)
       } else if (statsType == "file") {
-        TpchTestResult(query.getName(), seconds, TpchSchemaProvider.transferBytes,
-                       status)
-      } else if (statsType == "s3") {
+        TpchSchemaProvider.transferBytes
+      } /* else if (statsType == "s3") {
         TpchTestResult(query.getName(), seconds, S3StoreCSV.getTransferLength,
                        status)
-      } else {
-        TpchTestResult(query.getName(), seconds, 0,
-                       status)
+      } */ else {
+        0
       }
     }
-    S3StoreCSV.resetTransferLength
-    println("Query Time " + seconds)
+    val result = TpchTestResult(query.getName(), seconds, bytes,
+                                status, cores=config.workers)
+    // S3StoreCSV.resetTransferLength
+    println("Query Time " + seconds + " bytes " + bytes)
     result
+  }
+  def getBytes(config: Config) : Array[Long] = {
+    import scala.sys.process._
+    val bytes = new ListBuffer[Long]()
+    if (config.bytesServer != "") {
+      val server = config.bytesServer.split(",")(0)
+      var cmd = "ssh ${server} "
+      if (server == "local") {
+        cmd = ""
+      }
+      val adapters = config.bytesServer.split(",")(1).split(":")
+      println("server: " + server + " adapters " + adapters.mkString(", "))
+      for (a <- adapters) {
+        val output = s"${cmd}sudo ifconfig ${a}".!!
+        val bytesOutput = {
+          var currentBytes = ""
+          for (l <- output.split("\n")) {
+            if (l.contains("TX packets")) {
+              currentBytes = l.split(" ").filter(_.nonEmpty)(4)
+            }
+          }
+          currentBytes
+        }
+        bytes += bytesOutput.toLong
+      }
+    }
+    bytes.toArray
+  }
+  def calcBytes(config: Config, startBytes : Array[Long]) : Long = {
+    import scala.sys.process._
+    var totalBytes: Long = 0
+    val bytes = new ListBuffer[Long]()
+    if (config.bytesServer != "") {
+      val server = config.bytesServer.split(",")(0)
+      val adapters = config.bytesServer.split(",")(1).split(":")
+      val endBytes = getBytes(config)
+      println(startBytes)
+      println(endBytes)
+      for (i <- 0 until endBytes.length) {
+        totalBytes += endBytes(i) - startBytes(i)
+      }
+    }
+    totalBytes
   }
   def executeQueries(schemaProvider: TpchSchemaProvider,
                      queryNum: Int,
@@ -219,15 +266,16 @@ object TpchQuery {
         stageMetrics.createStageMetricsDF(nameTempView)
         val aggregateDF = stageMetrics.aggregateStageMetrics(nameTempView)
         val times = aggregateDF.select("executorRunTime", "executorCpuTime").take(1)(0)
-        result.utilization = times.getAs[Long](1) / times.getAs[Long](0)
-        result
-        //stageMetrics.printReport()
-        //stageMetrics.printAccumulables()
+        result.cpuTime = times.getAs[Long](0)
+
+        /* stageMetrics.printReport()
+        stageMetrics.printAccumulables()
         // save session metrics data
-        // val stageDF = stageMetrics.createStageMetricsDF("PerfStageMetrics")
-        // stageMetrics.saveData(stageDF.orderBy("jobId", "stageId"), "/build/tpch-results/stagemetrics_test1")
-        // val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
-        // stageMetrics.saveData(aggregatedDF, "/build/tpch-results/stagemetrics_report_test2")
+        val stageDF = stageMetrics.createStageMetricsDF("PerfStageMetrics")
+        stageMetrics.saveData(stageDF.orderBy("jobId", "stageId"), "/build/tpch-results/stagemetrics_test1")
+        val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
+        stageMetrics.saveData(aggregatedDF, "/build/tpch-results/stagemetrics_report_test2") */
+        result
       } else if (config.metrics == "task") {
         val taskMetrics = ch.cern.sparkmeasure.TaskMetrics(spark, true)
         taskMetrics.begin()
@@ -237,12 +285,16 @@ object TpchQuery {
         taskMetrics.createTaskMetricsDF(nameTempView)
         val aggregateDF = taskMetrics.aggregateTaskMetrics(nameTempView)
         val times = aggregateDF.select("executorRunTime", "executorCpuTime").take(1)(0)
-        result.utilization = (times.getAs[Long](1).asInstanceOf[Double] / times.getAs[Long](0)) * 100
+        //println("executorRunTime " + times.getAs[Long](1).asInstanceOf[Double] +
+        //        "executorCPUTime " + times.getAs[Long](0))
+        // result.utilization = (times.getAs[Long](1).asInstanceOf[Double] / times.getAs[Long](0)) * 100
+        result.cpuTime = times.getAs[Long](0)
+        /* taskMetrics.printReport()
+        taskMetrics.printAccumulables()
+        val taskDf = taskMetrics.createTaskMetricsDF("PerfTaskMetrics")
+        taskMetrics.saveData(taskDf.orderBy("jobId", "stageId", "index"), "/build/tpch-results/taskmetrics_test3")
+        */
         result
-        // taskMetrics.printReport()
-        // taskMetrics.printAccumulables()
-        // val taskDf = taskMetrics.createTaskMetricsDF("PerfTaskMetrics")
-        // taskMetrics.saveData(taskDf.orderBy("jobId", "stageId", "index"), "/build/tpch-results/taskmetrics_test3")
       } else {
         runQuery(schemaProvider, queryNum, config)
       }
@@ -263,6 +315,8 @@ object TpchQuery {
                      config.format == "csv") => true
       case "spark" if (config.protocol == "file" &&
                      config.format == "csv") => true
+      case "spark" if (config.protocol == "file" &&
+                     config.format == "parquet") => true
       case "spark" if (config.protocol == "file" &&
                      config.format == "tbl") => true
       case "spark" if (config.protocol == "hdfs" &&
@@ -362,7 +416,7 @@ object TpchQuery {
     config.options match {
       // With minio we do not support multiple partitions.
       case "minio" => config.partitions = 1
-      config.hostName = "minioserver:9000"
+      config.s3HostName = "minioserver:9000"
       case _ =>
     }
     true
@@ -405,7 +459,7 @@ object TpchQuery {
           .action((x, c) => c.copy(workers = x.toInt))
           .valueName("<number of spark workers>")
           .text("workers being used"),
-         opt[String]('s', "options")
+         opt[String]('z', "options")
           .action((x, c) => c.copy(options = x))
           .valueName("<options>")
           .text("optional config parameters (e.g. minio)")
@@ -414,6 +468,22 @@ object TpchQuery {
               case "minio" => success
               case _ => failure("mode must be minio")
             }),
+        opt[String]('s', "server")
+          .action((x, c) => c.copy(server = x))
+          .valueName("<server ip>")
+          .text("ip for NDP storage server."),
+        opt[String]('s', "compression")
+          .action((x, c) => c.copy(compression = x))
+          .valueName("<compression alg>")
+          .text("compression algorithm (lz4, None)"),
+        opt[String]('l', "compLevel")
+          .action((x, c) => c.copy(compLevel = x))
+          .valueName("<compression level>")
+          .text("degree to which we compress(-200-20)"),
+        opt[String]("bytesServer")
+          .abbr("bs")
+          .action((x, c) => c.copy(bytesServer = x))
+          .text("get bytes xferred from server/adpater(s) (server,adapter1:adapter2)"),
         opt[String]("mode")
           .action((x, c) => c.copy(mode = x))
           .valueName("<test mode>")
@@ -478,6 +548,9 @@ object TpchQuery {
         opt[Unit]("filePart")
           .action((x, c) => c.copy(filePart = true))
           .text("Use file based partitioning."),
+        opt[Unit]("pushRule")
+          .action((x, c) => c.copy(pushRule = true))
+          .text("Use a pushdown rule."),
         opt[Unit]("pushdown")
           .action((x, c) => c.copy(pushdown = true))
           .text("Enable all pushdowns (filter, project, aggregate), default is disabled."),
@@ -555,13 +628,12 @@ object TpchQuery {
    */
   private def showResults(results: ListBuffer[TpchTestResult]) : Unit = {
     println("Test Results")
-    println("Test    Time (sec)             Bytes      Utilization    Status")
-    println("---------------------------------------------------------------")
+    println("Test    Cores  Time (sec)             Bytes      CPU Time      Status")
+    println("---------------------------------------------------------------------")
     for (r <- results) {
       println(r)
     }
   }
-  private val hdfsServer = "dikehdfs"
   /** Fetch the path to be used to input data.
    *
    *  @param config - The test configuration.
@@ -573,34 +645,36 @@ object TpchQuery {
                     config.protocol == "file") => "file:///tpch-data/tpch-test"
         case ds if (ds == "spark" && config.format == "csv" &&
                     config.protocol == "file") => "file:///tpch-data/tpch-test-csv"
-        case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test/"
-        case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test-csv/"
-        case ds if (ds == "ndp" && config.format == "parquet" &&
-                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}/tpch-test-parquet/"
-        case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test/"
-        case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}/tpch-test-csv/"
-
-        case ds if (ds == "spark" && config.format == "tbl" &&
-                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test/"
-        case ds if (ds == "spark" && config.format == "csv" &&
-                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test-csv/"
-        case ds if (ds == "spark" && config.format == "tbl" &&
-                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}:9870/tpch-test/"
-        case ds if (ds == "spark" && config.format == "csv" &&
-                    config.protocol == "webhdfs") => s"webhdfs://${hdfsServer}:9870/tpch-test-csv/"
         case ds if (ds == "spark" && config.format == "parquet" &&
-                    config.protocol == "hdfs") => s"hdfs://${hdfsServer}:9000/tpch-test-parquet/"
+                    config.protocol == "file") => "file:///tpch-data/tpch-test-parquet"
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.protocol == "hdfs") => s"hdfs://${config.server}/tpch-test/"
+        case ds if (ds == "ndp" && config.format == "csv" &&
+                    config.protocol == "hdfs") => s"hdfs://${config.server}/tpch-test-csv/"
+        case ds if (ds == "ndp" && config.format == "parquet" &&
+                    config.protocol == "hdfs") => s"hdfs://${config.server}/tpch-test-parquet/"
+        case ds if (ds == "ndp" && config.format == "tbl" &&
+                    config.protocol == "webhdfs") => s"webhdfs://${config.server}/tpch-test/"
+        case ds if (ds == "ndp" && config.format == "csv" &&
+                    config.protocol == "webhdfs") => s"webhdfs://${config.server}/tpch-test-csv/"
+
+        case ds if (ds == "spark" && config.format == "tbl" &&
+                    config.protocol == "hdfs") => s"hdfs://${config.server}:9000/tpch-test/"
+        case ds if (ds == "spark" && config.format == "csv" &&
+                    config.protocol == "hdfs") => s"hdfs://${config.server}:9000/tpch-test-csv/"
+        case ds if (ds == "spark" && config.format == "tbl" &&
+                    config.protocol == "webhdfs") => s"webhdfs://${config.server}:9870/tpch-test/"
+        case ds if (ds == "spark" && config.format == "csv" &&
+                    config.protocol == "webhdfs") => s"webhdfs://${config.server}:9870/tpch-test-csv/"
+        case ds if (ds == "spark" && config.format == "parquet" &&
+                    config.protocol == "hdfs") => s"hdfs://${config.server}:9000/tpch-test-parquet/"
 
         case ds if (ds == "ndp" && config.format == "tbl" &&
-                    config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test/"
+                    config.protocol == "ndphdfs") => s"ndphdfs://${config.server}/tpch-test/"
         case ds if (ds == "ndp" && config.format == "csv" &&
-                    config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test-csv/"
+                    config.protocol == "ndphdfs") => s"ndphdfs://${config.server}/tpch-test-csv/"
         case ds if (ds == "ndp" && config.format == "parquet" &&
-                    config.protocol == "ndphdfs") => s"ndphdfs://${hdfsServer}/tpch-test-parquet/"
+                    config.protocol == "ndphdfs") => s"ndphdfs://${config.server}/tpch-test-parquet/"
 
         case ds if (ds == "ndp" && config.format == "tbl" &&
                     config.filePart) => "s3a://tpch-test-part"
@@ -629,7 +703,7 @@ object TpchQuery {
         directory.mkdir()
         println("creating data dir")
       }
-      RowIterator.setDebugFile(outputDir + config.format + "-" + test)
+      // RowIterator.setDebugFile(outputDir + config.format + "-" + test)
     }
   }
 
@@ -645,15 +719,16 @@ object TpchQuery {
 
     if (config.protocol.contains("hdfs")) {
       TpchTableReaderHdfs.init(TpchReaderParams(config))
-    } else {
+    } /* else {
      S3StoreCSV.resetTransferLength
-    }
+    } */
     println(s"InputPath: ${inputPath(config)}")
     config.inputDir = inputPath(config)
-    val schemaProvider = new TpchSchemaProvider(sparkContext,
-                                                TpchReaderParams(config))
     for (r <- 0 to config.repeat) {
       for (i <- config.testList) {
+        config.currentTest = f"TPC-H Test Q${i}%02d"
+        val schemaProvider = new TpchSchemaProvider(sparkContext,
+                                                    TpchReaderParams(config))
         val output = new ListBuffer[(String, Float)]
         setDebugFile(config, i.toString)
         results += executeQueries(schemaProvider, i, config)
@@ -677,7 +752,7 @@ object TpchQuery {
   def getOutputPath(config: Config): String = {
 
     config.protocol match {
-      case "hdfs" => s"hdfs://${hdfsServer}:9000/"
+      case "hdfs" => s"hdfs://${config.server}:9000/"
       case "file" => "file:///tpch-data/"
       case _ => ""
     }
