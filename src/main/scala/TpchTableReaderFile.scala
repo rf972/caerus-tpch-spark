@@ -1,5 +1,6 @@
 package org.tpch.tablereader
 
+import com.github.datasource.parse.RowIterator
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
@@ -37,11 +38,11 @@ object TpchTableReaderFile {
         .schema(schema)
         .option("header", (if (params.config.format == "tbl") "false" else "true"))
         .load(params.inputDir + "/" +  name + ".csv")
-    } else { // if (params.config.format == "parquet") {
+    } else if (params.config.format == "parquet") {
       sparkSession.read
         .format(params.config.format)
         .load(params.inputDir + "/" +  name + ".parquet")
-    } /*else {
+    } else {
       /* This will create a data frame out of a list of Row objects.
        */
       sqlContext.createDataFrame(sparkContext.textFile(
@@ -49,6 +50,6 @@ object TpchTableReaderFile {
           TpchSchemaProvider.transferBytes += l.size
           RowIterator.parseLine(l, schema, '|')
           }), StructType(schema))
-    } */
+    }
   }
 }
