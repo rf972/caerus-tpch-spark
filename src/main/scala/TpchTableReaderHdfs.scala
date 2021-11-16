@@ -86,6 +86,8 @@ object TpchTableReaderHdfs {
         .option("currenttest", params.config.currentTest)
         .option("ndpcompression", params.config.compression)
         .option("ndpcomplevel", params.config.compLevel)
+        .option((if (params.pushOpt.enableFilter) "ndpenable" else "ndpdisable") + "filterpush", "")
+        .option((if (params.pushOpt.enableAggregate) "ndpenable" else "ndpdisable") + "aggregatepush", "")
         .load(params.inputDir + "/" + name + "." + params.config.format)
     } else if (params.config.format == "parquet") {
       /* Parquet does not use a schema, it gets the schema from the file. */
