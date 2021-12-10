@@ -1,10 +1,11 @@
 package main.scala
 
+import org.apache.commons.io.IOUtils
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.catalyst.ScalaReflection
-import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.{DataFrame, Dataset, Row}
 import org.tpch.tablereader._
 import org.tpch.jdbc.TpchJdbc
 import org.tpch.tablereader.hdfs._
@@ -90,8 +91,8 @@ case class Supplier(
 
 
 class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
-  val dfMap = 
-    if (params.config.protocol == "s3") 
+  val dfMap =
+    if (params.config.protocol == "s3")
       Map(
           "customer" -> TpchTableReaderS3.readTable[Customer]("customer", params),
           "lineitem" -> TpchTableReaderS3.readTable[Lineitem]("lineitem", params),
@@ -111,7 +112,7 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
           "part" -> TpchJdbc.readTable[Part]("part", params),
           "partsupp" -> TpchJdbc.readTable[Partsupp]("partsupp", params),
           "supplier" -> TpchJdbc.readTable[Supplier]("supplier", params) )
-    else if (params.config.protocol.contains("hdfs") && 
+    else if (params.config.protocol.contains("hdfs") &&
              !params.config.format.contains("tbl"))
       Map(
           "customer" -> TpchTableReaderHdfs.readTable[Customer]("customer", params),
@@ -149,6 +150,17 @@ class TpchSchemaProvider(sc: SparkContext, params: TpchReaderParams) {
   val pushUDF = params.pushOpt.enableUDF
   val spark = SparkSession.builder
       .getOrCreate()
+  /* To allow queries, we need to place the query strings into
+   * src/main/resources/tpch/#.sql
+   */
+  val queries = (1 to 22).map { q => ""
+    // IOUtils.toString(
+    //    getClass().getClassLoader().getResourceAsStream(s"tpch/queries/$q.sql"))
+    }
+  def runQuery(query: Int): DataFrame = {
+    println(s"running query $query ${queries(query - 1)}")
+    spark.sql(queries(query - 1))
+  }
 }
 
 object TpchSchemaProvider {

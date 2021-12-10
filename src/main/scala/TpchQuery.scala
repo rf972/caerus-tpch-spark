@@ -10,6 +10,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.reflect.runtime.universe._
 
+import com.github.datasource.hdfs.HdfsStore
 // import com.github.datasource.s3.S3StoreCSV
 
 import org.apache.hadoop.conf.Configuration
@@ -22,13 +23,13 @@ import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.parquet.hadoop.util.HadoopInputFile
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.fs._
+import org.slf4j.LoggerFactory
 import org.tpch.config.Config
 import org.tpch.jdbc.TpchJdbc
 import org.tpch.pushdown.options.TpchPushdownOptions
 import org.tpch.tablereader._
 import org.tpch.tablereader.hdfs._
 import scopt.OParser
-
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.catalyst.ScalaReflection
@@ -82,8 +83,14 @@ abstract class TpchQuery {
 
 object TpchQuery {
 
-  private val sparkConf = new SparkConf().setAppName("Simple Application")
-  private val sparkContext = new SparkContext(sparkConf)
+  private val logger = LoggerFactory.getLogger(getClass)
+  private var sparkConf = new SparkConf().setAppName("Simple Application")
+                                .set("spark.scheduler.mode", "FAIR")
+  private var sparkContext = new SparkContext(sparkConf)
+  sparkContext.setLocalProperty("spark.scheduler.pool", "pool1")
+
+  def newContext: Unit = sparkContext = new SparkContext(sparkConf)
+  // sparkConf.set("spark.scheduler.mode", "FAIR")
 
   /** Writes the dataframe to disk.
    *
@@ -96,7 +103,12 @@ object TpchQuery {
   def outputDF(df: DataFrame, outputDir: String, className: String,
                config: Config): Unit = {
 
-    if (outputDir == null || outputDir == "")
+    /* if (!config.checkResults) {
+      /* When we are  not checking results, we want to
+       * execute as quickly as possible.
+       */
+      df.count()
+    } else */ if (outputDir == null || outputDir == "")
       df.collect().foreach(println)
     else {
       val castColumns = (df.schema.fields map { x =>
@@ -106,16 +118,19 @@ object TpchQuery {
           col(x.name)
         }
       }).toArray
+      val columns = (df.schema.fields map { x => col(x.name) }).toArray
 
       if (!className.contains("17") && config.checkResults) {
-        df.sort((df.columns.toSeq map { x => col(x) }).toArray:_*)
-            .select(castColumns:_*)
-            .repartition(1)
-            .write.mode("overwrite")
-            .format("csv")
-            .option("header", "true")
-            .option("partitions", "1")
-            .save(outputDir + "/" + className)
+        df
+          .select(castColumns:_*)
+          .repartition(1)
+          .orderBy((df.columns.toSeq map { x => col(x) }).toArray:_*)
+          .repartition(1)
+          .write.mode("overwrite")
+          .format("csv")
+          .option("header", "true")
+          .option("partitions", "1")
+          .save(outputDir + "/" + className)
       } else {
         df.repartition(1)
           .write.mode("overwrite")
@@ -134,8 +149,13 @@ object TpchQuery {
    *  @return String - Path to output results.
    */
   def getOutputDir(config: Config): String = {
-    var outputDir = "file:///build/tpch-results/latest/" + config.mode.toString
+    var outputDir =
+      if (config.outputLocation == "file")
+        s"file:///build/tpch-results/latest/${config.mode.toString}"
+      else
+        s"hdfs://${config.server}:9000/tpch-results/latest/${config.mode.toString}"
     outputDir += s"${config.datasource}-${config.protocol}-${config.format}"
+    if (config.threadNum != 0) outputDir += s"-thread${config.threadNum}"
     if (config.partitions != 0) {
       outputDir += "-partitions-1"
     }
@@ -167,7 +187,13 @@ object TpchQuery {
     val outputDir: String = getOutputDir(config)
     val query = Class.forName(f"main.scala.Q${queryNum}%02d")
                      .newInstance.asInstanceOf[TpchQuery]
-    val df = query.execute(sparkContext, schemaProvider)
+    val df = {
+      logger.info(f"Pushdown test start: Q${queryNum}%02d")
+      if (config.sql)
+        schemaProvider.runQuery(queryNum)
+      else
+        query.execute(sparkContext, schemaProvider)
+    }
     val t0 = System.nanoTime()
     val startBytes = getBytes(config)
     var status = true
@@ -175,7 +201,6 @@ object TpchQuery {
       df.explain(true)
       //println("Num Partitions: " + df.rdd.partitions.length)
     }
-    println("Starting " + query.getName())
     try {
       outputDF(df, outputDir, query.getName(), config)
     } catch {
@@ -183,6 +208,7 @@ object TpchQuery {
       println(org.apache.commons.lang.exception.ExceptionUtils.getStackTrace(t))
       status = false
     }
+    logger.info(f"Pushdown test end Q${queryNum}%02d")
     var t1 = System.nanoTime()
     val seconds = (t1 - t0) / 1000000000.0f // second
     val statsType = config.protocol
@@ -350,7 +376,7 @@ object TpchQuery {
       case "ndp" if (config.protocol == "s3" && config.format == "tbl") => true
       case ds if config.protocol == "jdbc" => true
       case ds if config.mode == "initCsv" || config.mode == "initParquet" ||
-                 config.mode == "initJdbc" => {
+                 config.mode == "initJdbc" || config.mode == "clearAll" => {
         true
       }
       case test => println(s"Unsupported test configuration: test: ${test} " +
@@ -487,12 +513,14 @@ object TpchQuery {
         opt[String]("mode")
           .action((x, c) => c.copy(mode = x))
           .valueName("<test mode>")
-          .text("test mode (initCsv, initParquet, initJdbc)")
+          .text("test mode (initCsv, initParquet, initJdbc, clearAll)")
           .validate( mode =>
             mode match {
               case "initCsv" => success
               case "initParquet" => success
-              case _ => failure("mode must be initCsv, initParquet")
+              case "clearAll" => success
+              case "parallel" => success
+              case _ => failure("mode must be initCsv, initParquet, clearAll, parallel")
             }),
         opt[String]('f', "format")
           .action((x, c) => c.copy(format = x))
@@ -541,6 +569,10 @@ object TpchQuery {
               case "ndphdfs" => success
               case protocol => failure(s"ERROR: protocol: ${protocol} not suported")
             }),
+        opt[String]("path")
+          .action((x, c) => c.copy(path = x))
+          .valueName("<path>")
+          .text("root path of files"),
         opt[String]('m', "metrics")
           .action((x, c) => c.copy(metrics = x))
           .valueName("<stage or task>")
@@ -556,13 +588,19 @@ object TpchQuery {
           .text("Enable all pushdowns (filter, project, aggregate), default is disabled."),
         opt[Unit]("pushFilter")
           .action((x, c) => c.copy(pushFilter = true))
-          .text("Enable pushdown of filter, default is disabled."),
+          .text("Enable pushdown of filter, default is enabled."),
         opt[Unit]("pushProject")
           .action((x, c) => c.copy(pushProject = true))
-          .text("Enable pushdown of project, default is disabled."),
+          .text("Enable pushdown of project, default is enabled."),
         opt[Unit]("pushAggregate")
           .action((x, c) => c.copy(pushAggregate = true))
-          .text("Enable pushdown of aggregate, default is disabled."),
+          .text("Enable pushdown of aggregate, default is enabled."),
+        opt[Unit]("disablePushFilter")
+          .action((x, c) => c.copy(pushFilter = false))
+          .text("Disable pushdown of filter, default is enabled."),
+        opt[Unit]("disablePushAggregate")
+          .action((x, c) => c.copy(pushAggregate = false))
+          .text("Disable pushdown of aggregate, default is enabled."),
         opt[Unit]("pushUDF")
           .action((x, c) => c.copy(pushUDF = true))
           .text("Enable pushdown of User Defined Functions, default is disabled."),
@@ -588,6 +626,14 @@ object TpchQuery {
           .action((x, c) => c.copy(repeat = x.toInt))
           .valueName("<repeat count>")
           .text("Number of times to repeat test"),
+        opt[Unit]("sql")
+          .abbr("sql")
+          .action((x, c) => c.copy(sql = true))
+          .text("use sql query string"),
+        opt[String]("outputLocation")
+          .abbr("ol")
+          .action((x, c) => c.copy(outputLocation = x))
+          .text("Location to output results (file, hdfs)"),
         opt[String]("fileInfo")
           .abbr("fi")
           .action((x, c) => c.copy(fileInfo = x))
@@ -641,6 +687,8 @@ object TpchQuery {
    */
   def inputPath(config: Config) = {
       config.datasource match {
+        case ds if (config.protocol == "hdfs" && config.format == "parquet" &&
+                    config.path != "") => s"hdfs://${config.server}:9000/${config.path}/"
         case ds if (ds == "spark" && config.format == "tbl" &&
                     config.protocol == "file") => "file:///tpch-data/tpch-test"
         case ds if (ds == "spark" && config.format == "csv" &&
@@ -712,10 +760,9 @@ object TpchQuery {
    * @param config - test configuration.
    * @return Unit
    */
-  def benchmark(config: Config): Unit = {
+  def benchmark(config: Config, testList: ArrayBuffer[Integer]): Unit = {
     var totalMs: Long = 0
     var results = new ListBuffer[TpchTestResult]
-    val outputDir: String = getOutputDir(config)
 
     if (config.protocol.contains("hdfs")) {
       TpchTableReaderHdfs.init(TpchReaderParams(config))
@@ -725,12 +772,13 @@ object TpchQuery {
     println(s"InputPath: ${inputPath(config)}")
     config.inputDir = inputPath(config)
     for (r <- 0 to config.repeat) {
-      for (i <- config.testList) {
+      for (i <- testList) {
         config.currentTest = f"TPC-H Test Q${i}%02d"
         val schemaProvider = new TpchSchemaProvider(sparkContext,
                                                     TpchReaderParams(config))
         val output = new ListBuffer[(String, Float)]
         setDebugFile(config, i.toString)
+        HdfsStore.sendClearAll(s"ndphdfs://dikehdfs/${config.path}/lineitem.${config.format}")
         results += executeQueries(schemaProvider, i, config)
         showResults(results)
       }
@@ -907,6 +955,7 @@ object TpchQuery {
     println("mode: " + config.mode)
     println("start: " + config.start)
     println("end: " + config.end)
+    println(s"inputPath: ${inputPath(config)}")
 
     if (config.verbose) {
       sparkContext.setLogLevel("TRACE")
@@ -923,10 +972,33 @@ object TpchQuery {
           initCsv(config)
         }
       }
+      case "clearAll" =>
+        println(s"InputPath: ${inputPath(config)}")
+        config.inputDir = inputPath(config)
+        val file = config.inputDir + "/lineitem." + config.format
+        logger.info(s"Send clearAll to $file")
+        HdfsStore.sendClearAll(file)
       case "initParquet" => initParquet(config)
       case "initJdbc" => initJdbc(config)
       case _ if (config.fileInfo != "") => fileInfo(config)
-      case _ => benchmark(config)
+      case _ if (config.mode == "parallel") => {
+        var i = 0
+        val threads = config.testList.map(t => {
+          println(s"Parallel mode starting ${t}")
+          i += 1
+          new BenchRunner(config.copy(threadNum=i), ArrayBuffer[Integer](t))
+        })
+        threads.foreach(r => r.start())
+        threads.foreach(r => r.join())
+        // newContext
+      }
+      case _  => benchmark(config, config.testList)
     }
+  }
+}
+
+class BenchRunner(c: Config, testList: ArrayBuffer[Integer]) extends Thread {
+  override def run: Unit = {
+    TpchQuery.benchmark(c, testList)
   }
 }
