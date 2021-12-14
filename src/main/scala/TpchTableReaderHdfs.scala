@@ -4,7 +4,7 @@ import scala.reflect.runtime.universe._
 import scala.collection.JavaConversions.mapAsScalaMap
 import java.net.URI
 
-import com.github.datasource.hdfs.PushdownOptimizationRule
+import com.github.datasource.generic.GenericPushdownOptimizationRule
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.fs.FileSystem
@@ -68,8 +68,8 @@ object TpchTableReaderHdfs {
     // sparkSession.sparkContext.hadoopConfiguration.set("dfs.client.read.shortcircuit.buffer.size", (1024 * 1024).toString)
     if (params.config.pushRule && !ruleAdded) {
       ruleAdded = true
-      println("PushdownOptimizationRule added")
-      sparkSession.experimental.extraOptimizations ++= Seq(PushdownOptimizationRule)
+      println("GenericPushdownOptimizationRule added")
+      sparkSession.experimental.extraOptimizations ++= Seq(GenericPushdownOptimizationRule)
     }
     resetStats()
   }

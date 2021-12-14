@@ -778,7 +778,7 @@ object TpchQuery {
                                                     TpchReaderParams(config))
         val output = new ListBuffer[(String, Float)]
         setDebugFile(config, i.toString)
-        HdfsStore.sendClearAll(s"ndphdfs://dikehdfs/${config.path}/lineitem.${config.format}")
+        // HdfsStore.sendClearAll(s"ndphdfs://dikehdfs/${config.path}/lineitem.${config.format}")
         results += executeQueries(schemaProvider, i, config)
         showResults(results)
       }
@@ -977,7 +977,7 @@ object TpchQuery {
         config.inputDir = inputPath(config)
         val file = config.inputDir + "/lineitem." + config.format
         logger.info(s"Send clearAll to $file")
-        HdfsStore.sendClearAll(file)
+        // HdfsStore.sendClearAll(file)
       case "initParquet" => initParquet(config)
       case "initJdbc" => initJdbc(config)
       case _ if (config.fileInfo != "") => fileInfo(config)
