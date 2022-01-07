@@ -10,9 +10,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.reflect.runtime.universe._
 
-import com.github.datasource.hdfs.HdfsStore
-// import com.github.datasource.s3.S3StoreCSV
-
 import org.apache.hadoop.conf.Configuration
 import org.apache.parquet.HadoopReadOptions
 import org.apache.parquet.ParquetReadOptions
@@ -103,12 +100,13 @@ object TpchQuery {
   def outputDF(df: DataFrame, outputDir: String, className: String,
                config: Config): Unit = {
 
-    /* if (!config.checkResults) {
+    if (!config.checkResults) {
       /* When we are  not checking results, we want to
        * execute as quickly as possible.
        */
-      df.count()
-    } else */ if (outputDir == null || outputDir == "")
+      // df.count()
+      df.collect()
+    } else if (outputDir == null || outputDir == "")
       df.collect().foreach(println)
     else {
       val castColumns = (df.schema.fields map { x =>
@@ -349,7 +347,7 @@ object TpchQuery {
                      config.format == "csv") => true
       case "spark" if (config.protocol == "hdfs" &&
                      config.format == "tbl") => true
-      case "spark" if (config.protocol == "hdfs" &&
+      case "spark" if ((config.protocol == "hdfs" || config.protocol == "webhdfs") &&
                        config.format == "parquet") => true
       case "ndp" if (config.protocol == "hdfs" &&
                      config.format == "csv") => true
@@ -689,6 +687,8 @@ object TpchQuery {
       config.datasource match {
         case ds if (config.protocol == "hdfs" && config.format == "parquet" &&
                     config.path != "") => s"hdfs://${config.server}:9000/${config.path}/"
+        case ds if (config.protocol == "webhdfs" && config.format == "parquet" &&
+                    config.path != "") => s"webhdfs://${config.server}:9870/${config.path}/"
         case ds if (ds == "spark" && config.format == "tbl" &&
                     config.protocol == "file") => "file:///tpch-data/tpch-test"
         case ds if (ds == "spark" && config.format == "csv" &&
